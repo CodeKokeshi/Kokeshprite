@@ -5,10 +5,12 @@ Contains color swatches and palette management
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
                             QPushButton, QLabel, QFrame, QScrollArea, QInputDialog,
-                            QMessageBox, QColorDialog)
+                            QMessageBox, QColorDialog, QFileDialog)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
 import random
+
+SWATCH_SIZE = 22  # Reduced from previous 30 for more compact UI
 
 class ColorSwatch(QPushButton):
     """Individual color swatch button"""
@@ -16,7 +18,7 @@ class ColorSwatch(QPushButton):
     def __init__(self, color=QColor(255, 255, 255)):
         super().__init__()
         self.color = color
-        self.setFixedSize(30, 30)
+        self.setFixedSize(SWATCH_SIZE, SWATCH_SIZE)
         self.update_color()
         self.setToolTip("Click to select, double-click to edit")
         
@@ -64,12 +66,12 @@ class ColorPalettePanel(QScrollArea):
         self.swatches = []
         self.selected_swatch = None
         self.init_ui()
-        self.create_default_palette()
         
     def init_ui(self):
         """Initialize the color palette UI"""
         # Set fixed width and scroll properties
-        self.setFixedWidth(150)
+        # Width dynamic: 4 columns + margins (slightly expanded for labels and buttons)
+        self.setFixedWidth((SWATCH_SIZE * 4) + 36)
         self.setWidgetResizable(True)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -118,7 +120,7 @@ class ColorPalettePanel(QScrollArea):
         # Color grid container
         self.color_grid_widget = QWidget()
         self.color_grid = QGridLayout(self.color_grid_widget)
-        self.color_grid.setSpacing(2)
+        self.color_grid.setSpacing(1)
         self.main_layout.addWidget(self.color_grid_widget)
         
         # Add colors button
@@ -142,6 +144,24 @@ class ColorPalettePanel(QScrollArea):
             }
         """)
         self.main_layout.addWidget(self.add_button)
+
+        # Import .hex palette button
+        self.import_button = QPushButton("📥 Import .hex")
+        self.import_button.setToolTip("Import a .hex palette file (one hex per line)")
+        self.import_button.clicked.connect(self.import_hex_palette)
+        self.import_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2d7dd2;
+                color: white;
+                border: none;
+                padding: 6px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #2569b1; }
+            QPushButton:pressed { background-color: #1e578f; }
+        """)
+        self.main_layout.addWidget(self.import_button)
         
         # Add stretch to push everything to top
         self.main_layout.addStretch()
@@ -249,3 +269,63 @@ class ColorPalettePanel(QScrollArea):
     def get_current_color(self):
         """Get the currently selected color"""
         return self.current_color_swatch.color
+
+    # -------------- Palette Import (.hex) --------------
+    def import_hex_palette(self):
+        """Import a .hex file and replace entire palette.
+        Format: each non-empty line contains a hex like #RRGGBB or RRGGBB.
+        Lines starting with ';' or '#' (comment lines) are ignored unless it's a valid color token.
+        """
+        file_path, _ = QFileDialog.getOpenFileName(self, "Import .hex Palette", "", "Hex Palette (*.hex);;All Files (*)")
+        if not file_path:
+            return
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+        except Exception as e:
+            QMessageBox.warning(self, "Import Failed", f"Could not read file:\n{e}")
+            return
+
+        parsed_colors = []
+        for raw in lines:
+            line = raw.strip()
+            if not line:
+                continue
+            # Allow comments
+            if line.startswith(';'):
+                continue
+            # Accept lines like #FFAABB or FFAABB
+            if line.startswith('#'):
+                token = line[1:]
+            else:
+                token = line
+            if len(token) != 6 or any(c not in '0123456789aAbBcCdDeEfF' for c in token):
+                # Not a valid color spec; skip silently (or we could warn)
+                continue
+            r = int(token[0:2], 16)
+            g = int(token[2:4], 16)
+            b = int(token[4:6], 16)
+            parsed_colors.append(QColor(r, g, b))
+
+        if not parsed_colors:
+            QMessageBox.information(self, "No Colors", "No valid hex colors found in file.")
+            return
+
+        # Replace palette
+        self._replace_palette(parsed_colors)
+        print(f"Imported {len(parsed_colors)} colors from {file_path}")
+
+    def _replace_palette(self, colors):
+        # Clear existing structures
+        self.colors.clear()
+        # Remove swatch widgets from layout
+        for sw in self.swatches:
+            sw.setParent(None)
+        self.swatches.clear()
+        # Re-add all colors
+        for c in colors:
+            self.add_color_to_palette(c)
+        # Reset selection to first color
+        if self.swatches:
+            first = self.swatches[0]
+            self.select_color(first.color)

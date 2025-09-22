@@ -22,7 +22,8 @@ class ToolsPanel(QScrollArea):
     def init_ui(self):
         """Initialize the tools panel UI"""
         # Set fixed width and scroll properties
-        self.setFixedWidth(120)
+        # Increased width so longest label (Eyedropper) not truncated
+        self.setFixedWidth(160)
         self.setWidgetResizable(True)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
