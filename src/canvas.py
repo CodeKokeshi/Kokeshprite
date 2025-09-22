@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, QRect, pyqtSignal, QPoint
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QPen, QBrush, QScreen, QCursor, QPainterPath
 import math
 from .system_eyedropper import SystemEyedropper
+from .history import HistoryManager
 
 class Canvas(QGraphicsView):
     """Main drawing canvas using QGraphicsView"""
@@ -31,6 +32,10 @@ class Canvas(QGraphicsView):
         self.current_tool = "brush"  # Current selected tool
         self.drawing = False
         self.last_point = None
+        # Pixel perfect tracking (pending corner suppression)
+        self._pp_committed = []  # committed pixels this stroke (list of (x,y))
+        self._pp_pending = None  # a single pending pixel (x,y) waiting to see if it becomes part of a diagonal or a straight line
+        self._pp_last = None     # last committed or accepted position
         
         # System eyedropper
         self.system_eyedropper = SystemEyedropper()
@@ -44,6 +49,9 @@ class Canvas(QGraphicsView):
         
         # Initialize the canvas
         self.init_canvas()
+        # History manager (after canvas init so pixmap exists)
+        self.history = HistoryManager()
+        self.history.push(self.pixmap)
         
     def init_canvas(self):
         """Initialize the graphics scene and canvas"""
@@ -165,6 +173,8 @@ class Canvas(QGraphicsView):
                 # Normal drawing tools - start drawing regardless of position
                 self.drawing = True
                 self.last_point = (x, y)
+                # Reset pixel-perfect state at stroke start
+                self._pp_reset_state()
                 self.use_current_tool(x, y)
             # Eyedropper is handled automatically by the system eyedropper
                 
@@ -200,50 +210,44 @@ class Canvas(QGraphicsView):
         if event.button() == Qt.MouseButton.LeftButton:
             self.drawing = False
             self.last_point = None
+            # Flush pending pixel (if any) then reset
+            if self.pixel_perfect and self.brush_size == 1 and self._pp_pending is not None:
+                self._pp_commit_pixel(*self._pp_pending)
+            self._pp_reset_state()
+            # Push snapshot after completed stroke
+            self.history.push(self.pixmap)
             
     def draw_brush_stroke(self, x, y):
         """Draw with the brush tool using current size and shape"""
+        if self.pixel_perfect and self.brush_size == 1:
+            self._pp_handle_pixel(round(x), round(y))
+            return
+
         painter = QPainter(self.pixmap)
         painter.setPen(QPen(self.current_color, 1))
         painter.setBrush(QBrush(self.current_color))
-        
-        # Apply pixel perfect snapping if enabled
+
         if self.pixel_perfect:
-            # Snap to pixel grid by rounding to nearest integer
             x = round(x)
             y = round(y)
-        
+
         if self.brush_size == 1:
-            # Single pixel - only draw if within bounds
             if 0 <= x < self.canvas_width and 0 <= y < self.canvas_height:
-                painter.drawPoint(x, y)
+                painter.drawPoint(int(x), int(y))
         else:
-            # Multi-pixel brush - draw even if center is outside, but clip to canvas
             radius = self.brush_size // 2
-            
-            # Calculate brush bounds
             brush_left = x - radius
             brush_top = y - radius
             brush_right = x + radius
             brush_bottom = y + radius
-            
-            # Check if brush overlaps with canvas at all
             if (brush_right >= 0 and brush_left < self.canvas_width and 
                 brush_bottom >= 0 and brush_top < self.canvas_height):
-                
-                # Set clipping to canvas bounds
                 painter.setClipRect(0, 0, self.canvas_width, self.canvas_height)
-                
                 if self.brush_shape == "circle":
-                    # Draw circle brush - for pixel art, we want filled circles
                     painter.drawEllipse(x - radius, y - radius, self.brush_size, self.brush_size)
-                else:  # square
-                    # Draw square brush
+                else:
                     painter.drawRect(x - radius, y - radius, self.brush_size, self.brush_size)
-        
         painter.end()
-        
-        # Update the display
         self.pixmap_item.setPixmap(self.pixmap)
         
     def draw_pixel(self, x, y):
@@ -281,21 +285,17 @@ class Canvas(QGraphicsView):
         
     def draw_brush_line(self, x1, y1, x2, y2):
         """Draw a line with the brush tool using current brush settings"""
-        # Use Bresenham-like algorithm to draw brush strokes along the line
+        # Bresenham
         dx = abs(x2 - x1)
         dy = abs(y2 - y1)
         sx = 1 if x1 < x2 else -1
         sy = 1 if y1 < y2 else -1
         err = dx - dy
-        
         x, y = x1, y1
-        
         while True:
             self.draw_brush_stroke(x, y)
-            
             if x == x2 and y == y2:
                 break
-                
             e2 = 2 * err
             if e2 > -dy:
                 err -= dy
@@ -303,6 +303,57 @@ class Canvas(QGraphicsView):
             if e2 < dx:
                 err += dx
                 y += sy
+
+    # ---------------- Pixel Perfect (retroactive) ----------------
+    def _pp_reset_state(self):
+        self._pp_committed = []
+        self._pp_pending = None
+        self._pp_last = None
+
+    def _pp_handle_pixel(self, x, y):
+        # Bounds & duplicate filter
+        if not (0 <= x < self.canvas_width and 0 <= y < self.canvas_height):
+            return
+        if self._pp_last == (x, y):
+            return
+
+        if self._pp_last is None:
+            self._pp_commit_pixel(x, y)
+            return
+
+        lx, ly = self._pp_last
+        dx = x - lx
+        dy = y - ly
+        # Only accept unit steps; if larger jump, flush pending and treat as new segment
+        if abs(dx) > 1 or abs(dy) > 1:
+            if self._pp_pending is not None:
+                self._pp_commit_pixel(*self._pp_pending)
+                self._pp_pending = None
+            self._pp_commit_pixel(x, y)
+            return
+
+        is_diagonal = abs(dx) == 1 and abs(dy) == 1
+        if is_diagonal:
+            # On diagonal: commit diagonal pixel; drop any pending (turning L into \ or /)
+            self._pp_commit_pixel(x, y)
+            self._pp_pending = None
+            return
+
+        # Axis-aligned step (horizontal or vertical)
+        # Buffer it; if next step becomes diagonal we'll discard it.
+        # If there's already a pending different pixel, commit the previous pending first.
+        if self._pp_pending is not None and self._pp_pending != (x, y):
+            self._pp_commit_pixel(*self._pp_pending)
+        self._pp_pending = (x, y)
+
+    def _pp_commit_pixel(self, x, y):
+        painter = QPainter(self.pixmap)
+        painter.setPen(QPen(self.current_color, 1))
+        painter.drawPoint(int(x), int(y))
+        painter.end()
+        self._pp_committed.append((x, y))
+        self._pp_last = (x, y)
+        self.pixmap_item.setPixmap(self.pixmap)
                 
     def erase_brush_stroke(self, x, y):
         """Erase with the brush tool using current size and shape"""
@@ -435,6 +486,8 @@ class Canvas(QGraphicsView):
         # Update the pixmap with the filled image
         self.pixmap = QPixmap.fromImage(image)
         self.pixmap_item.setPixmap(self.pixmap)
+        # Record fill action
+        self.history.push(self.pixmap)
         
     def on_system_color_picked(self, color):
         """Handle color picked from system eyedropper"""
@@ -487,6 +540,49 @@ class Canvas(QGraphicsView):
         """Clear the entire canvas"""
         self.pixmap.fill(Qt.GlobalColor.white)
         self.pixmap_item.setPixmap(self.pixmap)
+        self.history.push(self.pixmap)
+
+    # --------------- Dynamic Canvas Management ---------------
+    def resize_canvas(self, width: int, height: int):
+        """Resize canvas to new dimensions, clearing content."""
+        width = max(1, min(2048, int(width)))
+        height = max(1, min(2048, int(height)))
+        self.canvas_width = width
+        self.canvas_height = height
+        self.pixmap = QPixmap(self.canvas_width, self.canvas_height)
+        self.pixmap.fill(Qt.GlobalColor.white)
+        self.pixmap_item.setPixmap(self.pixmap)
+        self.centerOn(self.pixmap_item)
+        if hasattr(self, 'history'):
+            self.history.push(self.pixmap)
+
+    def load_image(self, qimage):
+        """Load a QImage into the canvas (auto-resize)."""
+        if qimage.width() > 2048 or qimage.height() > 2048:
+            return False
+        self.canvas_width = qimage.width()
+        self.canvas_height = qimage.height()
+        self.pixmap = QPixmap.fromImage(qimage)
+        self.pixmap_item.setPixmap(self.pixmap)
+        self.centerOn(self.pixmap_item)
+        if hasattr(self, 'history'):
+            self.history.push(self.pixmap)
+        return True
+
+    # ---------------- Undo / Redo ----------------
+    def undo(self):
+        new_pix = self.history.undo()
+        if new_pix is not None:
+            self.pixmap = QPixmap(new_pix)
+            self.pixmap_item.setPixmap(self.pixmap)
+            self.update_cursor()
+
+    def redo(self):
+        new_pix = self.history.redo()
+        if new_pix is not None:
+            self.pixmap = QPixmap(new_pix)
+            self.pixmap_item.setPixmap(self.pixmap)
+            self.update_cursor()
         
     def wheelEvent(self, event):
         """Handle mouse wheel for zooming"""
