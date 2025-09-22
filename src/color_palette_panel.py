@@ -70,8 +70,9 @@ class ColorPalettePanel(QScrollArea):
     def init_ui(self):
         """Initialize the color palette UI"""
         # Set fixed width and scroll properties
-        # Width dynamic: 4 columns + margins (slightly expanded for labels and buttons)
-        self.setFixedWidth((SWATCH_SIZE * 4) + 36)
+        # Width dynamic: 4 columns + margins; extra padding so vertical scrollbar never overlaps content
+        # Previous: +36; increased slightly for better clearance
+        self.setFixedWidth((SWATCH_SIZE * 4) + 48)
         self.setWidgetResizable(True)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
