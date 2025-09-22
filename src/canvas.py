@@ -3,8 +3,9 @@ Canvas widget for pixel art drawing
 """
 
 from PyQt6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QApplication
-from PyQt6.QtCore import Qt, QRect, pyqtSignal
-from PyQt6.QtGui import QPixmap, QPainter, QColor, QPen, QBrush, QScreen
+from PyQt6.QtCore import Qt, QRect, pyqtSignal, QPoint
+from PyQt6.QtGui import QPixmap, QPainter, QColor, QPen, QBrush, QScreen, QCursor, QPainterPath
+import math
 from .system_eyedropper import SystemEyedropper
 
 class Canvas(QGraphicsView):
@@ -24,6 +25,8 @@ class Canvas(QGraphicsView):
         
         # Drawing properties
         self.brush_size = 1
+        self.brush_shape = "circle"  # "circle" or "square"
+        self.pixel_perfect = False
         self.current_color = QColor(0, 0, 0)  # Black
         self.current_tool = "brush"  # Current selected tool
         self.drawing = False
@@ -32,6 +35,9 @@ class Canvas(QGraphicsView):
         # System eyedropper
         self.system_eyedropper = SystemEyedropper()
         self.system_eyedropper.color_picked.connect(self.on_system_color_picked)
+        
+        # Enable mouse tracking for cursor preview
+        self.setMouseTracking(True)
         
         # Enable key press events
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -63,6 +69,88 @@ class Canvas(QGraphicsView):
         # Center the canvas
         self.centerOn(self.pixmap_item)
         
+        # Update cursor for initial tool
+        self.update_cursor()
+        
+    def update_cursor(self):
+        """Update the cursor based on current tool and settings"""
+        if self.current_tool in ["brush", "eraser"]:
+            # Create custom brush cursor for both brush and eraser
+            cursor_pixmap = self.create_brush_cursor()
+            if cursor_pixmap:
+                cursor = QCursor(cursor_pixmap)
+                self.setCursor(cursor)
+            else:
+                self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
+        elif self.current_tool == "eyedropper":
+            # Custom eyedropper cursor or default
+            self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
+        else:
+            # Default cursor for other tools
+            self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
+            
+    def create_brush_cursor(self):
+        """Create a custom cursor showing brush size and shape"""
+        # Get current zoom level
+        current_scale = self.transform().m11()  # Get current scale factor
+        
+        # Calculate how big the brush will appear on screen
+        # brush_size is in canvas pixels, we need screen pixels
+        screen_brush_size = self.brush_size * current_scale
+        
+        # Ensure cursor is at least visible (minimum 4px) but allow it to be large for big brushes
+        cursor_size = max(4, min(512, int(round(screen_brush_size))))
+        
+        # Create pixmap for cursor with some padding for border
+        padding = 6  # Increased padding for better visibility
+        pixmap = QPixmap(cursor_size + padding, cursor_size + padding)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        
+        # Calculate center
+        center_x = (cursor_size + padding) // 2
+        center_y = (cursor_size + padding) // 2
+        radius = cursor_size // 2
+        
+        # Draw the brush preview
+        if self.brush_shape == "circle":
+            # Draw circle border (white outline)
+            border_pen = QPen(QColor(255, 255, 255), 2)
+            painter.setPen(border_pen)
+            painter.setBrush(QBrush())  # No fill for border
+            painter.drawEllipse(center_x - radius, center_y - radius, cursor_size, cursor_size)
+            
+            # Draw inner circle with current color (semi-transparent)
+            inner_color = QColor(self.current_color)
+            inner_color.setAlpha(80)  # Semi-transparent
+            inner_pen = QPen(QColor(0, 0, 0), 1)  # Black inner border
+            inner_brush = QBrush(inner_color)
+            painter.setPen(inner_pen)
+            painter.setBrush(inner_brush)
+            painter.drawEllipse(center_x - radius + 1, center_y - radius + 1, 
+                              cursor_size - 2, cursor_size - 2)
+        else:  # square
+            # Draw square border (white outline)
+            border_pen = QPen(QColor(255, 255, 255), 2)
+            painter.setPen(border_pen)
+            painter.setBrush(QBrush())  # No fill for border
+            painter.drawRect(center_x - radius, center_y - radius, cursor_size, cursor_size)
+            
+            # Draw inner square with current color (semi-transparent)
+            inner_color = QColor(self.current_color)
+            inner_color.setAlpha(80)  # Semi-transparent
+            inner_pen = QPen(QColor(0, 0, 0), 1)  # Black inner border
+            inner_brush = QBrush(inner_color)
+            painter.setPen(inner_pen)
+            painter.setBrush(inner_brush)
+            painter.drawRect(center_x - radius + 1, center_y - radius + 1, 
+                           cursor_size - 2, cursor_size - 2)
+        
+        painter.end()
+        return pixmap
+        
     def mousePressEvent(self, event):
         """Handle mouse press events for drawing"""
         if event.button() == Qt.MouseButton.LeftButton:
@@ -72,14 +160,13 @@ class Canvas(QGraphicsView):
             
             x, y = int(canvas_pos.x()), int(canvas_pos.y())
             
-            # Check if click is within canvas bounds
-            if 0 <= x < self.canvas_width and 0 <= y < self.canvas_height:
-                if self.current_tool != "eyedropper":
-                    # Normal drawing tools
-                    self.drawing = True
-                    self.last_point = (x, y)
-                    self.use_current_tool(x, y)
-                # Eyedropper is handled automatically by the system eyedropper
+            # Allow drawing even if mouse is outside canvas bounds (for large brushes)
+            if self.current_tool != "eyedropper":
+                # Normal drawing tools - start drawing regardless of position
+                self.drawing = True
+                self.last_point = (x, y)
+                self.use_current_tool(x, y)
+            # Eyedropper is handled automatically by the system eyedropper
                 
     def mouseMoveEvent(self, event):
         """Handle mouse move events for drawing and cursor tracking"""
@@ -92,15 +179,19 @@ class Canvas(QGraphicsView):
         # Emit mouse position for status bar
         self.mouse_position_changed.emit(x, y)
         
+        # Update cursor position (for brush preview)
+        if self.current_tool in ["brush", "eraser"]:
+            self.update()  # Trigger repaint for cursor update
+        
         # Continue drawing if left button is pressed
         if self.drawing and event.buttons() & Qt.MouseButton.LeftButton:
-            if 0 <= x < self.canvas_width and 0 <= y < self.canvas_height:
-                # Use current tool from last point to current point
-                if self.last_point and self.current_tool not in ["bucket", "eyedropper"]:
-                    self.draw_line_with_tool(self.last_point[0], self.last_point[1], x, y)
-                elif self.current_tool not in ["bucket", "eyedropper"]:
-                    self.use_current_tool(x, y)
-                self.last_point = (x, y)
+            # Allow drawing even when mouse is outside canvas bounds
+            # Use current tool from last point to current point
+            if self.last_point and self.current_tool not in ["bucket", "eyedropper"]:
+                self.draw_line_with_tool(self.last_point[0], self.last_point[1], x, y)
+            elif self.current_tool not in ["bucket", "eyedropper"]:
+                self.use_current_tool(x, y)
+            self.last_point = (x, y)
                 
         super().mouseMoveEvent(event)
         
@@ -110,15 +201,54 @@ class Canvas(QGraphicsView):
             self.drawing = False
             self.last_point = None
             
-    def draw_pixel(self, x, y):
-        """Draw a single pixel at the given coordinates"""
+    def draw_brush_stroke(self, x, y):
+        """Draw with the brush tool using current size and shape"""
         painter = QPainter(self.pixmap)
         painter.setPen(QPen(self.current_color, 1))
-        painter.drawPoint(x, y)
+        painter.setBrush(QBrush(self.current_color))
+        
+        # Apply pixel perfect snapping if enabled
+        if self.pixel_perfect:
+            # Snap to pixel grid by rounding to nearest integer
+            x = round(x)
+            y = round(y)
+        
+        if self.brush_size == 1:
+            # Single pixel - only draw if within bounds
+            if 0 <= x < self.canvas_width and 0 <= y < self.canvas_height:
+                painter.drawPoint(x, y)
+        else:
+            # Multi-pixel brush - draw even if center is outside, but clip to canvas
+            radius = self.brush_size // 2
+            
+            # Calculate brush bounds
+            brush_left = x - radius
+            brush_top = y - radius
+            brush_right = x + radius
+            brush_bottom = y + radius
+            
+            # Check if brush overlaps with canvas at all
+            if (brush_right >= 0 and brush_left < self.canvas_width and 
+                brush_bottom >= 0 and brush_top < self.canvas_height):
+                
+                # Set clipping to canvas bounds
+                painter.setClipRect(0, 0, self.canvas_width, self.canvas_height)
+                
+                if self.brush_shape == "circle":
+                    # Draw circle brush - for pixel art, we want filled circles
+                    painter.drawEllipse(x - radius, y - radius, self.brush_size, self.brush_size)
+                else:  # square
+                    # Draw square brush
+                    painter.drawRect(x - radius, y - radius, self.brush_size, self.brush_size)
+        
         painter.end()
         
         # Update the display
         self.pixmap_item.setPixmap(self.pixmap)
+        
+    def draw_pixel(self, x, y):
+        """Draw a single pixel at the given coordinates (legacy method)"""
+        self.draw_brush_stroke(x, y)
         
     def draw_line(self, x1, y1, x2, y2):
         """Draw a line between two points using Bresenham's algorithm"""
@@ -135,29 +265,117 @@ class Canvas(QGraphicsView):
     def use_current_tool(self, x, y):
         """Use the currently selected tool at the given coordinates"""
         if self.current_tool == "brush":
-            self.draw_pixel(x, y)
+            self.draw_brush_stroke(x, y)
         elif self.current_tool == "eraser":
-            self.erase_pixel(x, y)
+            self.erase_brush_stroke(x, y)
         elif self.current_tool == "bucket":
             self.bucket_fill(x, y)
             
     def draw_line_with_tool(self, x1, y1, x2, y2):
         """Draw a line using the current tool"""
         if self.current_tool == "brush":
-            self.draw_line(x1, y1, x2, y2)
+            self.draw_brush_line(x1, y1, x2, y2)
         elif self.current_tool == "eraser":
-            self.erase_line(x1, y1, x2, y2)
+            self.erase_brush_line(x1, y1, x2, y2)
         # Bucket tool doesn't need line drawing
         
-    def erase_pixel(self, x, y):
-        """Erase a single pixel (make it white)"""
+    def draw_brush_line(self, x1, y1, x2, y2):
+        """Draw a line with the brush tool using current brush settings"""
+        # Use Bresenham-like algorithm to draw brush strokes along the line
+        dx = abs(x2 - x1)
+        dy = abs(y2 - y1)
+        sx = 1 if x1 < x2 else -1
+        sy = 1 if y1 < y2 else -1
+        err = dx - dy
+        
+        x, y = x1, y1
+        
+        while True:
+            self.draw_brush_stroke(x, y)
+            
+            if x == x2 and y == y2:
+                break
+                
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x += sx
+            if e2 < dx:
+                err += dx
+                y += sy
+                
+    def erase_brush_stroke(self, x, y):
+        """Erase with the brush tool using current size and shape"""
         painter = QPainter(self.pixmap)
         painter.setPen(QPen(QColor(255, 255, 255), 1))  # White color
-        painter.drawPoint(x, y)
+        painter.setBrush(QBrush(QColor(255, 255, 255)))  # White brush
+        
+        # Apply pixel perfect snapping if enabled
+        if self.pixel_perfect:
+            x = round(x)
+            y = round(y)
+        
+        if self.brush_size == 1:
+            # Single pixel - only erase if within bounds
+            if 0 <= x < self.canvas_width and 0 <= y < self.canvas_height:
+                painter.drawPoint(x, y)
+        else:
+            # Multi-pixel eraser - erase even if center is outside, but clip to canvas
+            radius = self.brush_size // 2
+            
+            # Calculate brush bounds
+            brush_left = x - radius
+            brush_top = y - radius
+            brush_right = x + radius
+            brush_bottom = y + radius
+            
+            # Check if brush overlaps with canvas at all
+            if (brush_right >= 0 and brush_left < self.canvas_width and 
+                brush_bottom >= 0 and brush_top < self.canvas_height):
+                
+                # Set clipping to canvas bounds
+                painter.setClipRect(0, 0, self.canvas_width, self.canvas_height)
+                
+                if self.brush_shape == "circle":
+                    # Draw circle eraser
+                    painter.drawEllipse(x - radius, y - radius, self.brush_size, self.brush_size)
+                else:  # square
+                    # Draw square eraser
+                    painter.drawRect(x - radius, y - radius, self.brush_size, self.brush_size)
+        
         painter.end()
         
         # Update the display
         self.pixmap_item.setPixmap(self.pixmap)
+        
+    def erase_brush_line(self, x1, y1, x2, y2):
+        """Erase a line with the eraser tool using current brush settings"""
+        # Use Bresenham-like algorithm to erase along the line
+        dx = abs(x2 - x1)
+        dy = abs(y2 - y1)
+        sx = 1 if x1 < x2 else -1
+        sy = 1 if y1 < y2 else -1
+        err = dx - dy
+        
+        x, y = x1, y1
+        
+        while True:
+            self.erase_brush_stroke(x, y)
+            
+            if x == x2 and y == y2:
+                break
+                
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x += sx
+            if e2 < dx:
+                err += dx
+                y += sy
+                
+    def erase_pixel(self, x, y):
+        """Erase a single pixel (make it white) - legacy method"""
+        self.erase_brush_stroke(x, y)
         
     def erase_line(self, x1, y1, x2, y2):
         """Erase a line (make it white)"""
@@ -171,6 +389,10 @@ class Canvas(QGraphicsView):
         
     def bucket_fill(self, x, y):
         """Fill an area with the current color (improved flood fill)"""
+        # Only bucket fill if the click is within canvas bounds
+        if not (0 <= x < self.canvas_width and 0 <= y < self.canvas_height):
+            return
+            
         # Get the image as QImage for pixel manipulation
         image = self.pixmap.toImage()
         target_color = image.pixelColor(x, y)
@@ -220,9 +442,25 @@ class Canvas(QGraphicsView):
         self.color_picked.emit(color)
         print(f"System eyedropper picked color: {color.name()}")
         
+    def update_brush_settings(self, settings):
+        """Update brush settings from options panel"""
+        self.brush_size = settings['size']
+        self.brush_shape = settings['shape']
+        self.pixel_perfect = settings['pixel_perfect']
+        
+        # Update cursor when settings change
+        if self.current_tool in ["brush", "eraser"]:
+            self.update_cursor()
+        
+        print(f"Brush settings updated: size={self.brush_size}, shape={self.brush_shape}, pixel_perfect={self.pixel_perfect}")
+        
     def set_brush_color(self, color):
         """Set the current brush color"""
         self.current_color = color
+        
+        # Update cursor when color changes (for brush preview)
+        if self.current_tool in ["brush", "eraser"]:
+            self.update_cursor()
         
     def set_brush_size(self, size):
         """Set the current brush size"""
@@ -239,6 +477,9 @@ class Canvas(QGraphicsView):
         # If switching to eyedropper, auto-activate it
         if tool_name == "eyedropper":
             self.system_eyedropper.set_enabled(True)
+            
+        # Update cursor for new tool
+        self.update_cursor()
             
         print(f"Canvas tool changed to: {tool_name}")  # Debug
         
@@ -270,6 +511,10 @@ class Canvas(QGraphicsView):
         # Move scene to old position
         delta = new_pos - old_pos
         self.translate(delta.x(), delta.y())
+        
+        # Update cursor after zoom change (brush size appearance changes with zoom)
+        if self.current_tool in ["brush", "eraser"]:
+            self.update_cursor()
         
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts"""

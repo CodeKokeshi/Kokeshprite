@@ -10,6 +10,7 @@ from PyQt6.QtGui import QAction
 from .canvas import Canvas
 from .tools_panel import ToolsPanel
 from .color_palette_panel import ColorPalettePanel
+from .options_panel import OptionsPanel
 
 class MainWindow(QMainWindow):
     """Main application window"""
@@ -27,26 +28,38 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
-        # Main layout
-        main_layout = QHBoxLayout(central_widget)
+        # Main layout (vertical to include options panel at top)
+        main_layout = QVBoxLayout(central_widget)
+        
+        # Create options panel (top)
+        self.options_panel = OptionsPanel()
+        main_layout.addWidget(self.options_panel)
+        
+        # Create horizontal layout for the main content
+        content_layout = QHBoxLayout()
+        main_layout.addLayout(content_layout)
         
         # Create color palette panel (left side)
         self.color_palette = ColorPalettePanel()
-        main_layout.addWidget(self.color_palette)
+        content_layout.addWidget(self.color_palette)
         
         # Create canvas (center)
         self.canvas = Canvas()
-        main_layout.addWidget(self.canvas)
+        content_layout.addWidget(self.canvas)
         
         # Create tools panel (right side)
         self.tools_panel = ToolsPanel()
-        main_layout.addWidget(self.tools_panel)
+        content_layout.addWidget(self.tools_panel)
         
         # Connect signals
         self.canvas.mouse_position_changed.connect(self.update_coordinates)
         self.tools_panel.tool_changed.connect(self.canvas.set_current_tool)
+        self.tools_panel.tool_changed.connect(self.options_panel.set_current_tool)
         self.color_palette.color_selected.connect(self.canvas.set_brush_color)
         self.canvas.color_picked.connect(self.color_palette.set_current_color)
+        
+        # Connect options panel signals
+        self.options_panel.brush_settings_changed.connect(self.canvas.update_brush_settings)
         
         # Create menu bar
         self.create_menu_bar()
