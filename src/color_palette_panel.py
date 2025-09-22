@@ -5,7 +5,7 @@ Contains color swatches and palette management
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
                             QPushButton, QLabel, QFrame, QScrollArea, QInputDialog,
-                            QMessageBox)
+                            QMessageBox, QColorDialog)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
 import random
@@ -18,6 +18,7 @@ class ColorSwatch(QPushButton):
         self.color = color
         self.setFixedSize(30, 30)
         self.update_color()
+        self.setToolTip("Click to select, double-click to edit")
         
     def update_color(self):
         """Update the swatch appearance"""
@@ -41,6 +42,15 @@ class ColorSwatch(QPushButton):
         """Set the color of this swatch"""
         self.color = color
         self.update_color()
+    def mouseDoubleClickEvent(self, event):
+        # Emit a custom signal via parent palette by using event bubbling if needed
+        # We'll let the parent intercept by installing an event filter or simpler: call back
+        parent = self.parent()
+        while parent and not hasattr(parent, 'edit_swatch_color'):
+            parent = parent.parent()
+        if parent and hasattr(parent, 'edit_swatch_color'):
+            parent.edit_swatch_color(self)
+        super().mouseDoubleClickEvent(event)
 
 class ColorPalettePanel(QScrollArea):
     """Color palette panel with expandable colors"""
@@ -52,6 +62,7 @@ class ColorPalettePanel(QScrollArea):
         super().__init__()
         self.colors = []
         self.swatches = []
+        self.selected_swatch = None
         self.init_ui()
         self.create_default_palette()
         
@@ -165,7 +176,10 @@ class ColorPalettePanel(QScrollArea):
         
         # Create swatch
         swatch = ColorSwatch(color)
-        swatch.clicked.connect(lambda checked, c=color: self.select_color(c))
+        # Connect using swatch instance so edited color is picked up dynamically
+        def handle_click(checked=False, s=swatch):
+            self.select_color(s.color)
+        swatch.clicked.connect(handle_click)
         self.swatches.append(swatch)
         
         # Add to grid (4 columns)
@@ -199,9 +213,34 @@ class ColorPalettePanel(QScrollArea):
             
     def select_color(self, color):
         """Select a color from the palette"""
+        # Find swatch matching color (first match) to set selected_swatch reference
+        # If user clicked a swatch, click handler already supplies its current color; we map swatch by color attribute
+        for sw in self.swatches:
+            if sw.color == color:
+                self.selected_swatch = sw
+                break
         self.current_color_swatch.set_color(color)
         self.color_selected.emit(color)
         print(f"Selected color: {color.name()}")
+
+    def edit_swatch_color(self, swatch):
+        """Open a QColorDialog to edit a swatch's color and update palette list"""
+        initial = swatch.color
+        new_color = QColorDialog.getColor(initial, self, "Edit Color")
+        if new_color.isValid():
+            swatch.set_color(new_color)
+            # Update internal colors list to keep in sync
+            try:
+                idx = self.swatches.index(swatch)
+                self.colors[idx] = new_color
+            except ValueError:
+                pass
+            # If edited swatch was current, update current display
+            if self.selected_swatch is swatch:
+                # Auto-update current color and emit so brush updates
+                self.set_current_color(new_color)
+                self.color_selected.emit(new_color)
+            print(f"Edited swatch color -> {new_color.name()}")
         
     def set_current_color(self, color):
         """Set the current color (from eyedropper, etc.)"""
