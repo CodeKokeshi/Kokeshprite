@@ -15,6 +15,7 @@ class Canvas(QGraphicsView):
     # Signals
     mouse_position_changed = pyqtSignal(int, int)  # x, y coordinates
     color_picked = pyqtSignal(QColor)  # Picked color from eyedropper
+    modified = pyqtSignal()  # Emitted after a change affecting pixel data
     
     def __init__(self, width=64, height=64):
         super().__init__()
@@ -216,6 +217,7 @@ class Canvas(QGraphicsView):
             self._pp_reset_state()
             # Push snapshot after completed stroke
             self.history.push(self.pixmap)
+            self.modified.emit()
             
     def draw_brush_stroke(self, x, y):
         """Draw with the brush tool using current size and shape"""
@@ -488,6 +490,7 @@ class Canvas(QGraphicsView):
         self.pixmap_item.setPixmap(self.pixmap)
         # Record fill action
         self.history.push(self.pixmap)
+        self.modified.emit()
         
     def on_system_color_picked(self, color):
         """Handle color picked from system eyedropper"""
@@ -541,6 +544,7 @@ class Canvas(QGraphicsView):
         self.pixmap.fill(Qt.GlobalColor.white)
         self.pixmap_item.setPixmap(self.pixmap)
         self.history.push(self.pixmap)
+        self.modified.emit()
 
     # --------------- Dynamic Canvas Management ---------------
     def resize_canvas(self, width: int, height: int):
@@ -555,6 +559,7 @@ class Canvas(QGraphicsView):
         self.centerOn(self.pixmap_item)
         if hasattr(self, 'history'):
             self.history.push(self.pixmap)
+        self.modified.emit()
 
     def load_image(self, qimage):
         """Load a QImage into the canvas (auto-resize)."""
@@ -567,6 +572,7 @@ class Canvas(QGraphicsView):
         self.centerOn(self.pixmap_item)
         if hasattr(self, 'history'):
             self.history.push(self.pixmap)
+        self.modified.emit()
         return True
 
     # ---------------- Undo / Redo ----------------

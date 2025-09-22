@@ -19,6 +19,8 @@ class MainWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
+        self.current_file_path: str | None = None
+        self.document_modified: bool = False
         self.init_ui()
         
     def init_ui(self):
@@ -66,6 +68,7 @@ class MainWindow(QMainWindow):
         self.color_palette.color_selected.connect(self.canvas.set_brush_color)
         self.canvas.color_picked.connect(self.color_palette.set_current_color)
         self.options_panel.brush_settings_changed.connect(self.canvas.update_brush_settings)
+        self.canvas.modified.connect(self.on_canvas_modified)
 
         # Create menu bar & status bar
         self.create_menu_bar()
@@ -91,9 +94,15 @@ class MainWindow(QMainWindow):
         
         self.save_action = QAction('Save', self)
         self.save_action.setShortcut('Ctrl+S')
-        # Placeholder: disable until implemented & document open
+        self.save_action.triggered.connect(self.save_file)
         self.save_action.setEnabled(False)
         file_menu.addAction(self.save_action)
+
+        self.save_as_action = QAction('Save As', self)
+        self.save_as_action.setShortcuts([QKeySequence('Ctrl+Shift+S')])
+        self.save_as_action.triggered.connect(self.save_file_as)
+        self.save_as_action.setEnabled(False)
+        file_menu.addAction(self.save_as_action)
         
         file_menu.addSeparator()
         
@@ -148,6 +157,10 @@ class MainWindow(QMainWindow):
             self.status_bar.setVisible(True)
             self.set_edit_actions_enabled(True)
             self.save_action.setEnabled(True)
+            self.save_as_action.setEnabled(True)
+            self.current_file_path = None
+            self.document_modified = True
+            self.update_window_title()
 
     def open_file_dialog(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Open Image", "", "Images (*.png *.bmp *.gif *.jpg *.jpeg)")
@@ -166,6 +179,63 @@ class MainWindow(QMainWindow):
         self.status_bar.setVisible(True)
         self.set_edit_actions_enabled(True)
         self.save_action.setEnabled(True)
+        self.save_as_action.setEnabled(True)
+        self.current_file_path = file_path
+        self.document_modified = False
+        self.update_window_title()
 
     def open_editor(self):
         self.stacked.setCurrentWidget(self.editor_container)
+
+    # -------------- Modification Tracking --------------
+    def on_canvas_modified(self):
+        self.document_modified = True
+        self.update_window_title()
+
+    def update_window_title(self):
+        base = "Kokeshprite - Pixel Art Editor"
+        if self.current_file_path:
+            import os
+            name = os.path.basename(self.current_file_path)
+        else:
+            name = "Untitled"
+        if self.document_modified:
+            self.setWindowTitle(f"* {name} - {base}")
+        else:
+            self.setWindowTitle(f"{name} - {base}")
+
+    # -------------- Save Logic --------------
+    def save_file(self):
+        if self.current_file_path is None:
+            return self.save_file_as()
+        self._write_pixmap(self.current_file_path)
+        return True
+
+    def save_file_as(self):
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Image", self.current_file_path or "untitled.png", "PNG Image (*.png);;BMP Image (*.bmp);;JPEG Image (*.jpg *.jpeg)")
+        if not file_path:
+            return False
+        if self._write_pixmap(file_path):
+            self.current_file_path = file_path
+            return True
+        return False
+
+    def _write_pixmap(self, path: str) -> bool:
+        fmt = None
+        lower = path.lower()
+        if lower.endswith('.png'):
+            fmt = 'PNG'
+        elif lower.endswith('.bmp'):
+            fmt = 'BMP'
+        elif lower.endswith('.jpg') or lower.endswith('.jpeg'):
+            fmt = 'JPEG'
+        else:
+            # Default to PNG
+            path = path + '.png'
+            fmt = 'PNG'
+        if self.canvas.pixmap.save(path, fmt):
+            self.document_modified = False
+            self.update_window_title()
+            return True
+        QMessageBox.warning(self, "Save Failed", f"Could not save file to: {path}")
+        return False
