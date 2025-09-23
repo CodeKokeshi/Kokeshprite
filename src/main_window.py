@@ -149,6 +149,9 @@ class MainWindow(QMainWindow):
 
     # -------------- Start Screen Actions --------------
     def show_new_file_dialog(self):
+        # If an existing modified document is open, confirm before proceeding
+        if not self.ensure_safe_to_discard():
+            return
         dialog = NewFileDialog(self, default_width=64, default_height=64)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             w, h = dialog.get_dimensions()
@@ -163,6 +166,9 @@ class MainWindow(QMainWindow):
             self.update_window_title()
 
     def open_file_dialog(self):
+        # Confirm discard if there are unsaved changes
+        if not self.ensure_safe_to_discard():
+            return
         file_path, _ = QFileDialog.getOpenFileName(self, "Open Image", "", "Images (*.png *.bmp *.gif *.jpg *.jpeg)")
         if not file_path:
             return
@@ -239,3 +245,45 @@ class MainWindow(QMainWindow):
             return True
         QMessageBox.warning(self, "Save Failed", f"Could not save file to: {path}")
         return False
+
+    # -------------- Unsaved Changes Handling --------------
+    def ensure_safe_to_discard(self) -> bool:
+        """Prompt the user to save/discard/cancel if there are unsaved changes.
+
+        Returns True if it's safe to proceed (no changes, user saved, or user chose discard).
+        Returns False if the action should be aborted (user canceled or save failed/canceled).
+        """
+        if not self.document_modified:
+            return True
+        # Build message box
+        if self.current_file_path:
+            import os
+            name = os.path.basename(self.current_file_path)
+        else:
+            name = "Untitled"
+        mbox = QMessageBox(self)
+        mbox.setIcon(QMessageBox.Icon.Warning)
+        mbox.setWindowTitle("Unsaved Changes")
+        mbox.setText(f"You have unsaved changes to '{name}'.")
+        mbox.setInformativeText("Do you want to save them before continuing?")
+        save_btn = mbox.addButton(QMessageBox.StandardButton.Save)
+        discard_btn = mbox.addButton(QMessageBox.StandardButton.Discard)
+        cancel_btn = mbox.addButton(QMessageBox.StandardButton.Cancel)
+        mbox.setDefaultButton(save_btn)
+        mbox.exec()
+        clicked = mbox.clickedButton()
+        if clicked == save_btn:
+            # Attempt to save; if user cancels Save As it returns False
+            if self.save_file():
+                return True
+            return False  # Save failed or canceled
+        elif clicked == discard_btn:
+            return True
+        else:  # Cancel
+            return False
+
+    def closeEvent(self, event):  # type: ignore[override]
+        if self.ensure_safe_to_discard():
+            event.accept()
+        else:
+            event.ignore()

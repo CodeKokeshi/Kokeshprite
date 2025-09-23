@@ -48,12 +48,20 @@ class Canvas(QGraphicsView):
         
         # Enable key press events
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        
-        # Initialize the canvas
+        # Track last mouse position for dynamic cursor (eraser inverse preview)
+        self._last_cursor_pos = (0, 0)
+        # Panning state (needs to exist before init_canvas -> _update_scene_rect)
+        self._panning = False
+        self._pan_start = None  # screen position (QPointF)
+        self._pan_scroll_origin = None  # (hval, vval)
+        self._scene_padding = 1024  # pixels of empty margin around canvas for free panning
+
+        # Initialize the canvas (uses _scene_padding)
         self.init_canvas()
         # History manager (after canvas init so pixmap exists)
         self.history = HistoryManager()
         self.history.push(self.pixmap)
+        
         
     def init_canvas(self):
         """Initialize the graphics scene and canvas"""
@@ -68,6 +76,8 @@ class Canvas(QGraphicsView):
         # Add pixmap to scene
         self.pixmap_item = QGraphicsPixmapItem(self.pixmap)
         self.scene.addItem(self.pixmap_item)
+        # Provide padded scene rect so we can pan beyond visible canvas
+        self._update_scene_rect()
         
         # Set up the view
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
@@ -100,69 +110,102 @@ class Canvas(QGraphicsView):
             self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
             
     def create_brush_cursor(self):
-        """Create a custom cursor showing brush size and shape"""
-        # Get current zoom level
-        current_scale = self.transform().m11()  # Get current scale factor
-        
-        # Calculate how big the brush will appear on screen
-        # brush_size is in canvas pixels, we need screen pixels
-        screen_brush_size = self.brush_size * current_scale
-        
-        # Ensure cursor is at least visible (minimum 4px) but allow it to be large for big brushes
-        cursor_size = max(4, min(512, int(round(screen_brush_size))))
-        
-        # Create pixmap for cursor with some padding for border
-        padding = 6  # Increased padding for better visibility
-        pixmap = QPixmap(cursor_size + padding, cursor_size + padding)
+        """Create a pixel-perfect cursor preview using the actual brush mask.
+        Each mask pixel -> filled square scaled to current zoom, matching stamping footprint.
+        """
+        current_scale = self.transform().m11()
+        size = self.brush_size
+        mask = self._brush_mask(size, self.brush_shape)
+        if not mask:
+            return None
+        # Determine mask bounds
+        min_dx = min(dx for dx, _ in mask)
+        max_dx = max(dx for dx, _ in mask)
+        min_dy = min(dy for _, dy in mask)
+        max_dy = max(dy for _, dy in mask)
+        mask_w = (max_dx - min_dx + 1)
+        mask_h = (max_dy - min_dy + 1)
+
+        # Pixel cell size on screen
+        cell = max(1, int(round(current_scale)))
+        # Add 1px outline margin for visibility
+        padding = 2
+        pixmap = QPixmap(mask_w * cell + padding * 2, mask_h * cell + padding * 2)
         pixmap.fill(Qt.GlobalColor.transparent)
-        
+
         painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        
-        # Calculate center
-        center_x = (cursor_size + padding) // 2
-        center_y = (cursor_size + padding) // 2
-        radius = cursor_size // 2
-        
-        # Draw the brush preview
-        if self.brush_shape == "circle":
-            # Draw circle border (white outline)
-            border_pen = QPen(QColor(255, 255, 255), 2)
-            painter.setPen(border_pen)
-            painter.setBrush(QBrush())  # No fill for border
-            painter.drawEllipse(center_x - radius, center_y - radius, cursor_size, cursor_size)
-            
-            # Draw inner circle with current color (semi-transparent)
-            inner_color = QColor(self.current_color)
-            inner_color.setAlpha(80)  # Semi-transparent
-            inner_pen = QPen(QColor(0, 0, 0), 1)  # Black inner border
-            inner_brush = QBrush(inner_color)
-            painter.setPen(inner_pen)
-            painter.setBrush(inner_brush)
-            painter.drawEllipse(center_x - radius + 1, center_y - radius + 1, 
-                              cursor_size - 2, cursor_size - 2)
-        else:  # square
-            # Draw square border (white outline)
-            border_pen = QPen(QColor(255, 255, 255), 2)
-            painter.setPen(border_pen)
-            painter.setBrush(QBrush())  # No fill for border
-            painter.drawRect(center_x - radius, center_y - radius, cursor_size, cursor_size)
-            
-            # Draw inner square with current color (semi-transparent)
-            inner_color = QColor(self.current_color)
-            inner_color.setAlpha(80)  # Semi-transparent
-            inner_pen = QPen(QColor(0, 0, 0), 1)  # Black inner border
-            inner_brush = QBrush(inner_color)
-            painter.setPen(inner_pen)
-            painter.setBrush(inner_brush)
-            painter.drawRect(center_x - radius + 1, center_y - radius + 1, 
-                           cursor_size - 2, cursor_size - 2)
-        
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+
+        # Common outline colors
+        outline_color = QColor(255, 255, 255, 220)
+        void_outline = QColor(0, 0, 0, 220)
+        painter.setPen(Qt.PenStyle.NoPen)
+        occupied = set(mask)
+
+        if self.current_tool == 'eraser':
+            # Dynamic per-pixel inverse preview of underlying canvas content
+            img = self.pixmap.toImage()
+            cx, cy = self._last_cursor_pos
+            preview_alpha = 180
+            for dx, dy in occupied:
+                px = int(cx + dx)
+                py = int(cy + dy)
+                if 0 <= px < self.canvas_width and 0 <= py < self.canvas_height:
+                    base = img.pixelColor(px, py)
+                else:
+                    base = QColor(255, 255, 255)  # treat OOB as white
+                inv = QColor(255 - base.red(), 255 - base.green(), 255 - base.blue())
+                inv.setAlpha(preview_alpha)
+                painter.setBrush(QBrush(inv))
+                sx = (dx - min_dx) * cell + padding
+                sy = (dy - min_dy) * cell + padding
+                painter.drawRect(sx, sy, cell, cell)
+        else:
+            # Standard brush preview uses current color (semi-transparent)
+            fill_color = QColor(self.current_color)
+            preview_alpha = 120
+            fill_color.setAlpha(preview_alpha)
+            painter.setBrush(QBrush(fill_color))
+            for dx, dy in occupied:
+                sx = (dx - min_dx) * cell + padding
+                sy = (dy - min_dy) * cell + padding
+                painter.drawRect(sx, sy, cell, cell)
+
+        # Outline: draw white border around occupied cluster (one-pixel outside)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(outline_color, 1))
+        # Simple outer rectangle for whole mask plus optional internal holes (none here)
+        painter.drawRect(padding, padding, mask_w * cell - 1, mask_h * cell - 1)
+
+        # For circle small sizes highlight interior shape edges for clarity (optional)
+        if self.brush_shape == 'circle' and size in (3, 5):
+            painter.setPen(QPen(void_outline, 1))
+            # Mark corners not filled (visual hint) by small dots
+            for dy in range(mask_h):
+                for dx in range(mask_w):
+                    gx = dx + min_dx
+                    gy = dy + min_dy
+                    if (gx, gy) not in occupied:
+                        # draw tiny dot only if adjacent to occupied (edge of circle)
+                        if any((gx+ox, gy+oy) in occupied for ox, oy in ((1,0),(-1,0),(0,1),(0,-1))):
+                            cx = dx * cell + padding + cell//2
+                            cy = dy * cell + padding + cell//2
+                            painter.drawPoint(cx, cy)
+
         painter.end()
         return pixmap
         
     def mousePressEvent(self, event):
         """Handle mouse press events for drawing"""
+        if event.button() == Qt.MouseButton.MiddleButton:
+            # Start panning (camera move)
+            self._panning = True
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self._pan_start = event.position()
+            # Store initial scrollbar values
+            self._pan_scroll_origin = (self.horizontalScrollBar().value(), self.verticalScrollBar().value())
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             # Convert screen coordinates to scene coordinates
             scene_pos = self.mapToScene(event.position().toPoint())
@@ -182,6 +225,33 @@ class Canvas(QGraphicsView):
                 
     def mouseMoveEvent(self, event):
         """Handle mouse move events for drawing and cursor tracking"""
+        # Handle panning first (scrollbar-based like Aseprite)
+        if self._panning and self._pan_start is not None and self._pan_scroll_origin is not None:
+            delta = event.position() - self._pan_start
+            h0, v0 = self._pan_scroll_origin
+            self.horizontalScrollBar().setValue(int(h0 - delta.x()))
+            self.verticalScrollBar().setValue(int(v0 - delta.y()))
+            event.accept()
+            # Dynamic expansion if nearing padded edge (optional minimal logic)
+            view_center_scene = self.mapToScene(self.viewport().rect().center())
+            r = self.scene.sceneRect()
+            pad_extend_trigger = 128
+            expanded = False
+            if view_center_scene.x() < r.left() + pad_extend_trigger:
+                r.setLeft(r.left() - self._scene_padding)
+                expanded = True
+            if view_center_scene.x() > r.right() - pad_extend_trigger:
+                r.setRight(r.right() + self._scene_padding)
+                expanded = True
+            if view_center_scene.y() < r.top() + pad_extend_trigger:
+                r.setTop(r.top() - self._scene_padding)
+                expanded = True
+            if view_center_scene.y() > r.bottom() - pad_extend_trigger:
+                r.setBottom(r.bottom() + self._scene_padding)
+                expanded = True
+            if expanded:
+                self.scene.setSceneRect(r)
+        
         # Convert screen coordinates to scene coordinates
         scene_pos = self.mapToScene(event.position().toPoint())
         canvas_pos = self.pixmap_item.mapFromScene(scene_pos)
@@ -190,10 +260,16 @@ class Canvas(QGraphicsView):
         
         # Emit mouse position for status bar
         self.mouse_position_changed.emit(x, y)
+
+        # Track last cursor position for dynamic eraser preview
+        self._last_cursor_pos = (x, y)
         
         # Update cursor position (for brush preview)
         if self.current_tool in ["brush", "eraser"]:
-            self.update()  # Trigger repaint for cursor update
+            if self.current_tool == 'eraser':
+                # Regenerate cursor each move for inverse colors
+                self.update_cursor()
+            self.update()  # Trigger repaint (if any overlay logic is later added)
         
         # Continue drawing if left button is pressed
         if self.drawing and event.buttons() & Qt.MouseButton.LeftButton:
@@ -209,6 +285,13 @@ class Canvas(QGraphicsView):
         
     def mouseReleaseEvent(self, event):
         """Handle mouse release events"""
+        if event.button() == Qt.MouseButton.MiddleButton and self._panning:
+            self._panning = False
+            self._pan_start = None
+            self._pan_scroll_origin = None
+            self.update_cursor()
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             self.drawing = False
             self.last_point = None
@@ -597,6 +680,7 @@ class Canvas(QGraphicsView):
         self.pixmap = QPixmap(self.canvas_width, self.canvas_height)
         self.pixmap.fill(Qt.GlobalColor.white)
         self.pixmap_item.setPixmap(self.pixmap)
+        self._update_scene_rect()
         self.centerOn(self.pixmap_item)
         if hasattr(self, 'history'):
             self.history.push(self.pixmap)
@@ -610,6 +694,7 @@ class Canvas(QGraphicsView):
         self.canvas_height = qimage.height()
         self.pixmap = QPixmap.fromImage(qimage)
         self.pixmap_item.setPixmap(self.pixmap)
+        self._update_scene_rect()
         self.centerOn(self.pixmap_item)
         if hasattr(self, 'history'):
             self.history.push(self.pixmap)
@@ -658,6 +743,11 @@ class Canvas(QGraphicsView):
         # Update cursor after zoom change (brush size appearance changes with zoom)
         if self.current_tool in ["brush", "eraser"]:
             self.update_cursor()
+
+    # --------- Scene Rect Helper (padded workspace) ---------
+    def _update_scene_rect(self):
+        padding = self._scene_padding
+        self.scene.setSceneRect(-padding, -padding, self.canvas_width + padding * 2, self.canvas_height + padding * 2)
         
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts"""
