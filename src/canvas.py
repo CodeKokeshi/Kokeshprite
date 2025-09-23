@@ -8,6 +8,7 @@ from PyQt6.QtGui import QPixmap, QPainter, QColor, QPen, QBrush, QScreen, QCurso
 import math
 from .system_eyedropper import SystemEyedropper
 from .history import HistoryManager
+from functools import lru_cache
 
 class Canvas(QGraphicsView):
     """Main drawing canvas using QGraphicsView"""
@@ -237,20 +238,60 @@ class Canvas(QGraphicsView):
             if 0 <= x < self.canvas_width and 0 <= y < self.canvas_height:
                 painter.drawPoint(int(x), int(y))
         else:
-            radius = self.brush_size // 2
-            brush_left = x - radius
-            brush_top = y - radius
-            brush_right = x + radius
-            brush_bottom = y + radius
-            if (brush_right >= 0 and brush_left < self.canvas_width and 
-                brush_bottom >= 0 and brush_top < self.canvas_height):
-                painter.setClipRect(0, 0, self.canvas_width, self.canvas_height)
-                if self.brush_shape == "circle":
-                    painter.drawEllipse(x - radius, y - radius, self.brush_size, self.brush_size)
-                else:
-                    painter.drawRect(x - radius, y - radius, self.brush_size, self.brush_size)
+            size = int(self.brush_size)
+            # Generate mask offsets relative to center
+            for dx, dy in self._brush_mask(size, self.brush_shape):
+                px = int(x + dx)
+                py = int(y + dy)
+                if 0 <= px < self.canvas_width and 0 <= py < self.canvas_height:
+                    painter.drawPoint(px, py)
         painter.end()
         self.pixmap_item.setPixmap(self.pixmap)
+
+    @staticmethod
+    @lru_cache(maxsize=256)
+    def _brush_mask(size: int, shape: str):
+        """Return list of (dx, dy) offsets for given size & shape.
+        Circle uses discrete disk rasterization similar to common pixel editors (Aseprite style).
+        Square is full size x size block.
+        """
+        if size <= 1:
+            return [(0, 0)]
+        offsets = []
+        if shape == 'square':
+            half = size // 2
+            if size % 2:  # odd
+                for dy in range(-half, half + 1):
+                    for dx in range(-half, half + 1):
+                        offsets.append((dx, dy))
+            else:  # even, center between pixels
+                # Even sizes cover a symmetric block with no single center pixel
+                start = -half
+                for dy in range(start, start + size):
+                    for dx in range(start, start + size):
+                        offsets.append((dx, dy))
+            return offsets
+        # Circle
+        if size % 2:  # odd sizes: center at integer, radius = size//2
+            r = size // 2
+            r2 = r * r + 0.0001
+            for dy in range(-r, r + 1):
+                for dx in range(-r, r + 1):
+                    if dx*dx + dy*dy <= r2:
+                        offsets.append((dx, dy))
+        else:
+            # even sizes: treat center at (0.5,0.5); iterate grid from -half .. half-1
+            half = size // 2
+            r = size / 2.0
+            r2 = r * r + 0.0001
+            for dy in range(-half, half):
+                for dx in range(-half, half):
+                    # Pixel center offset from (0,0) which is midpoint between four central pixels is (dx+0.5, dy+0.5)
+                    cx = dx + 0.5
+                    cy = dy + 0.5
+                    if (cx*cx + cy*cy) <= r2:
+                        offsets.append((dx, dy))
+        return offsets
         
     def draw_pixel(self, x, y):
         """Draw a single pixel at the given coordinates (legacy method)"""
