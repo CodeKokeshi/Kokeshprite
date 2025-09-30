@@ -124,12 +124,74 @@ class MainWindow(QMainWindow):
         self.redo_action.triggered.connect(lambda: self.canvas.redo())
         edit_menu.addAction(self.redo_action)
 
+        # Add separator
+        edit_menu.addSeparator()
+        
+        # Adjustments submenu
+        adjustments_menu = edit_menu.addMenu('Adjustments')
+        
+        # Sort Color Palette submenu
+        sort_palette_menu = adjustments_menu.addMenu('Sort Color Palette')
+        
+        # Sorting options
+        sort_options = [
+            ("HSV Similarity", "HSV Similarity (Original)"),
+            ("By Hue", "Hue Only"),
+            ("By Saturation", "Saturation Only"),
+            ("By Brightness", "Value/Brightness Only"),
+            ("By Red", "Red Component"),
+            ("By Green", "Green Component"),
+            ("By Blue", "Blue Component"),
+            ("By Luminance", "RGB Luminance"),
+            ("By Temperature", "Color Temperature"),
+            ("Complementary Groups", "Complementary Groups"),
+            ("Random Shuffle", "Random Shuffle")
+        ]
+        
+        for menu_text, method_name in sort_options:
+            action = QAction(menu_text, self)
+            action.triggered.connect(lambda checked, method=method_name: self.sort_palette(method))
+            sort_palette_menu.addAction(action)
+        
+        # Store adjustments menu for enabling/disabling
+        self.adjustments_menu = adjustments_menu
+
+        # View menu
+        view_menu = menubar.addMenu('View')
+        
+        # Show submenu
+        show_menu = view_menu.addMenu('Show')
+        
+        # Grid option with checkbox indicator
+        self.grid_enabled = False  # Track grid state
+        self.grid_action = QAction('Grid', self)
+        self.grid_action.triggered.connect(self.toggle_grid)
+        self.update_grid_action_text()
+        show_menu.addAction(self.grid_action)
+
         # Disable until a document is open
         self.set_edit_actions_enabled(False)
 
     def set_edit_actions_enabled(self, enabled: bool):
         self.undo_action.setEnabled(enabled)
         self.redo_action.setEnabled(enabled)
+        self.adjustments_menu.setEnabled(enabled)
+    
+    def sort_palette(self, method_name):
+        """Sort the color palette using the specified method."""
+        if hasattr(self, 'color_palette'):
+            self.color_palette.sort_palette_by_method(method_name)
+    
+    def toggle_grid(self):
+        """Toggle the grid visibility state (visual checkbox only for now)."""
+        self.grid_enabled = not self.grid_enabled
+        self.update_grid_action_text()
+        print(f"Grid {'enabled' if self.grid_enabled else 'disabled'}")
+    
+    def update_grid_action_text(self):
+        """Update the grid action text with checkbox indicator."""
+        checkbox = "☑" if self.grid_enabled else "☐"
+        self.grid_action.setText(f"Grid {checkbox}")
         
     def create_status_bar(self):
         """Create the status bar"""

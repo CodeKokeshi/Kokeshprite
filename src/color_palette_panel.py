@@ -167,6 +167,23 @@ class ColorPalettePanel(QScrollArea):
         # Add stretch to push everything to top
         self.main_layout.addStretch()
         
+        # Initialize with 8 random colors
+        self.create_initial_palette()
+        
+    def create_initial_palette(self):
+        """Create initial palette with 8 random colors"""
+        for _ in range(8):
+            # Generate random RGB values
+            r = random.randint(0, 255)
+            g = random.randint(0, 255)
+            b = random.randint(0, 255)
+            color = QColor(r, g, b)
+            self.add_color_to_palette(color)
+        
+        # Select the first color by default
+        if self.swatches:
+            self.select_color(self.swatches[0].color)
+        
     def create_default_palette(self):
         """Create the default 16-color palette"""
         default_colors = [
@@ -330,3 +347,162 @@ class ColorPalettePanel(QScrollArea):
         if self.swatches:
             first = self.swatches[0]
             self.select_color(first.color)
+
+    def sort_palette_by_method(self, method_name):
+        """Sort palette colors by the selected method."""
+        if len(self.colors) < 2:
+            return  # Nothing to sort
+        
+        if method_name == "HSV Similarity (Original)":
+            self._sort_by_hsv_similarity()
+        elif method_name == "Hue Only":
+            self._sort_by_hue()
+        elif method_name == "Saturation Only":
+            self._sort_by_saturation()
+        elif method_name == "Value/Brightness Only":
+            self._sort_by_value()
+        elif method_name == "Red Component":
+            self._sort_by_red()
+        elif method_name == "Green Component":
+            self._sort_by_green()
+        elif method_name == "Blue Component":
+            self._sort_by_blue()
+        elif method_name == "RGB Luminance":
+            self._sort_by_luminance()
+        elif method_name == "Color Temperature":
+            self._sort_by_temperature()
+        elif method_name == "Complementary Groups":
+            self._sort_by_complementary()
+        elif method_name == "Random Shuffle":
+            self._sort_random()
+        
+        print(f"Sorted {len(self.colors)} colors by: {method_name}")
+    
+    def _sort_by_hsv_similarity(self):
+        """Original HSV similarity sorting."""
+        color_data = []
+        for color in self.colors:
+            h, s, v, _ = color.getHsv()
+            h_norm = h / 359.0 if h >= 0 else 0
+            s_norm = s / 255.0
+            v_norm = v / 255.0
+            
+            if s < 30:  # Gray colors
+                sort_key = (999, v_norm, s_norm)
+            else:
+                sort_key = (h_norm, s_norm, v_norm)
+            
+            color_data.append((sort_key, color))
+        
+        color_data.sort(key=lambda x: x[0])
+        sorted_colors = [item[1] for item in color_data]
+        self._replace_palette(sorted_colors)
+    
+    def _sort_by_hue(self):
+        """Sort by hue component only."""
+        color_data = []
+        for color in self.colors:
+            h, s, v, _ = color.getHsv()
+            # Put grays (low saturation) at the end
+            if s < 20:
+                sort_key = 999  # End of spectrum
+            else:
+                sort_key = h if h >= 0 else 0
+            color_data.append((sort_key, color))
+        
+        color_data.sort(key=lambda x: x[0])
+        sorted_colors = [item[1] for item in color_data]
+        self._replace_palette(sorted_colors)
+    
+    def _sort_by_saturation(self):
+        """Sort by saturation component only."""
+        color_data = []
+        for color in self.colors:
+            h, s, v, _ = color.getHsv()
+            color_data.append((s, color))
+        
+        color_data.sort(key=lambda x: x[0], reverse=True)  # High sat first
+        sorted_colors = [item[1] for item in color_data]
+        self._replace_palette(sorted_colors)
+    
+    def _sort_by_value(self):
+        """Sort by value/brightness component only."""
+        color_data = []
+        for color in self.colors:
+            h, s, v, _ = color.getHsv()
+            color_data.append((v, color))
+        
+        color_data.sort(key=lambda x: x[0], reverse=True)  # Bright first
+        sorted_colors = [item[1] for item in color_data]
+        self._replace_palette(sorted_colors)
+    
+    def _sort_by_red(self):
+        """Sort by red component."""
+        color_data = [(color.red(), color) for color in self.colors]
+        color_data.sort(key=lambda x: x[0], reverse=True)
+        sorted_colors = [item[1] for item in color_data]
+        self._replace_palette(sorted_colors)
+    
+    def _sort_by_green(self):
+        """Sort by green component."""
+        color_data = [(color.green(), color) for color in self.colors]
+        color_data.sort(key=lambda x: x[0], reverse=True)
+        sorted_colors = [item[1] for item in color_data]
+        self._replace_palette(sorted_colors)
+    
+    def _sort_by_blue(self):
+        """Sort by blue component."""
+        color_data = [(color.blue(), color) for color in self.colors]
+        color_data.sort(key=lambda x: x[0], reverse=True)
+        sorted_colors = [item[1] for item in color_data]
+        self._replace_palette(sorted_colors)
+    
+    def _sort_by_luminance(self):
+        """Sort by perceived luminance (weighted RGB)."""
+        color_data = []
+        for color in self.colors:
+            # Standard luminance formula
+            luminance = 0.299 * color.red() + 0.587 * color.green() + 0.114 * color.blue()
+            color_data.append((luminance, color))
+        
+        color_data.sort(key=lambda x: x[0], reverse=True)  # Bright first
+        sorted_colors = [item[1] for item in color_data]
+        self._replace_palette(sorted_colors)
+    
+    def _sort_by_temperature(self):
+        """Sort by color temperature (warm to cool)."""
+        color_data = []
+        for color in self.colors:
+            r, g, b = color.red(), color.green(), color.blue()
+            # Simple temperature heuristic: warm colors have more red/yellow
+            temperature = (r + g * 0.5) - (b * 1.5)
+            color_data.append((temperature, color))
+        
+        color_data.sort(key=lambda x: x[0], reverse=True)  # Warm first
+        sorted_colors = [item[1] for item in color_data]
+        self._replace_palette(sorted_colors)
+    
+    def _sort_by_complementary(self):
+        """Group colors by complementary pairs."""
+        color_data = []
+        for color in self.colors:
+            h, s, v, _ = color.getHsv()
+            if s < 20:  # Grays
+                group_key = 999  # Put at end
+            else:
+                # Group by complementary zones (every 30 degrees)
+                hue_zone = (h // 30) if h >= 0 else 0
+                group_key = hue_zone
+            
+            color_data.append((group_key, h if h >= 0 else 0, s, color))
+        
+        color_data.sort(key=lambda x: (x[0], x[1]))  # Group, then hue within group
+        sorted_colors = [item[3] for item in color_data]
+        self._replace_palette(sorted_colors)
+    
+    def _sort_random(self):
+        """Randomly shuffle the palette."""
+        import random
+        colors_copy = self.colors.copy()
+        random.shuffle(colors_copy)
+        self._replace_palette(colors_copy)
