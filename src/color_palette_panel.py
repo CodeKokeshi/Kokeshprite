@@ -63,19 +63,59 @@ class ColorSwatch(QPushButton):
         else:
             border_color = "#b8b8b8"
             border_width = 2
-        self.setStyleSheet(f"""
-            QPushButton {{
-                border: {border_width}px solid {border_color};
-                border-radius: 4px;
-                background-color: transparent;
-            }}
-            QPushButton:hover {{
-                border: 3px solid #3daee9;
-            }}
-            QPushButton:pressed {{
-                border: 3px solid #1e6ca1;
-            }}
-        """)
+        
+        # Check if this swatch matches the current color for highlighting
+        is_current_color = False
+        try:
+            # Find the palette panel
+            parent_panel = self.parent()
+            while parent_panel and not hasattr(parent_panel, 'current_color_swatch'):
+                parent_panel = parent_panel.parent()
+            
+            if (parent_panel and hasattr(parent_panel, 'current_color_swatch') and 
+                parent_panel.current_color_swatch and 
+                self.color.rgba() == parent_panel.current_color_swatch.color.rgba()):
+                is_current_color = True
+        except:
+            pass
+        
+        # If this matches current color, add highlighting border
+        if is_current_color:
+            # Use black border if swatch is white/light, otherwise white border
+            if self.color.lightnessF() > 0.8:  # Light color - use black border
+                highlight_color = "#000000"
+            else:  # Dark color - use white border  
+                highlight_color = "#ffffff"
+            
+            self.setStyleSheet(f"""
+                QPushButton {{
+                    border: {border_width}px solid {border_color};
+                    border-radius: 4px;
+                    background-color: transparent;
+                    outline: 2px solid {highlight_color};
+                    outline-offset: 1px;
+                }}
+                QPushButton:hover {{
+                    border: 3px solid #3daee9;
+                }}
+                QPushButton:pressed {{
+                    border: 3px solid #1e6ca1;
+                }}
+            """)
+        else:
+            self.setStyleSheet(f"""
+                QPushButton {{
+                    border: {border_width}px solid {border_color};
+                    border-radius: 4px;
+                    background-color: transparent;
+                }}
+                QPushButton:hover {{
+                    border: 3px solid #3daee9;
+                }}
+                QPushButton:pressed {{
+                    border: 3px solid #1e6ca1;
+                }}
+            """)
 
     @classmethod
     def _create_checkerboard_pixmap(cls) -> QPixmap:
@@ -112,6 +152,10 @@ class ColorPalettePanel(QWidget):
         self.swatches = []
         self.selected_swatch = None
         self.max_columns = 8
+        
+        # Aseprite-style transparent slot (always first, not part of colors list)
+        self.transparent_swatch = None
+        
         self.init_ui()
         
     def init_ui(self):
@@ -259,6 +303,9 @@ class ColorPalettePanel(QWidget):
 
         self.main_layout.addWidget(self.swatch_scroll_area)
         
+        # Create Aseprite-style transparent slot (always first)
+        self._create_transparent_slot()
+        
         # Add colors button
         self.add_button = QPushButton("➕ Add Colors")
         self.add_button.setToolTip("Add more random colors to palette")
@@ -388,15 +435,35 @@ class ColorPalettePanel(QWidget):
             if widget is not None:
                 widget.setParent(self.color_grid_widget)
 
-        total = len(self.swatches)
-        columns = max(1, min(self.max_columns, total if total > 0 else 1))
-        rows = max(1, math.ceil(total / columns)) if total else 1
+        # Always place transparent slot at (0,0)
+        if self.transparent_swatch:
+            self.color_grid.addWidget(self.transparent_swatch, 0, 0)
 
+        # Place regular swatches starting from position 1
+        total = len(self.swatches)
+        columns = self.max_columns
+        
         for index, swatch in enumerate(self.swatches):
-            row = index // columns
-            col = index % columns
+            # Calculate position offset by 1 (transparent slot is at 0)
+            position = index + 1
+            row = position // columns
+            col = position % columns
             self.color_grid.addWidget(swatch, row, col)
         self.color_grid_widget.adjustSize()
+
+    def _create_transparent_slot(self):
+        """Create the Aseprite-style transparent slot (always first)"""
+        transparent_color = QColor(0, 0, 0, 0)  # Fully transparent
+        self.transparent_swatch = ColorSwatch(transparent_color)
+        
+        def handle_transparent_click(checked=False):
+            self.select_color(transparent_color, self.transparent_swatch)
+        
+        self.transparent_swatch.clicked.connect(handle_transparent_click)
+        self.transparent_swatch.set_selected(False)
+        
+        # Add transparent slot to grid
+        self._refresh_swatch_grid()
 
     def add_picker_color_to_palette(self):
         """Add the current picker color as a new swatch"""
@@ -422,14 +489,22 @@ class ColorPalettePanel(QWidget):
             
     def select_color(self, color, swatch: ColorSwatch | None = None):
         """Select a color from the palette"""
-        if swatch is not None and swatch not in self.swatches:
+        # Handle transparent swatch specially
+        if swatch is self.transparent_swatch:
+            pass  # Use the provided transparent swatch
+        elif swatch is not None and swatch not in self.swatches and swatch is not self.transparent_swatch:
             swatch = None
 
         if swatch is None:
-            for candidate in self.swatches:
-                if candidate.color == color:
-                    swatch = candidate
-                    break
+            # Check transparent swatch first
+            if self.transparent_swatch and self.transparent_swatch.color == color:
+                swatch = self.transparent_swatch
+            else:
+                # Check regular swatches
+                for candidate in self.swatches:
+                    if candidate.color == color:
+                        swatch = candidate
+                        break
 
         if self.selected_swatch and self.selected_swatch is not swatch:
             self.selected_swatch.set_selected(False)
@@ -450,7 +525,10 @@ class ColorPalettePanel(QWidget):
         """Focus the inline picker for editing a swatch"""
         self.select_color(swatch.color, swatch)
         self.color_picker.set_color(swatch.color, emit_signal=False)
-        self.color_picker.focus_hex_input()
+        # Focus hex input in palette panel (not color picker)
+        if hasattr(self, 'hex_input'):
+            self.hex_input.setFocus()
+            self.hex_input.selectAll()
         
     def set_current_color(self, color, sync_picker: bool = True):
         """Set the current color (from eyedropper, picker, etc.)"""
@@ -467,6 +545,16 @@ class ColorPalettePanel(QWidget):
             self.apply_picker_button.setEnabled(self.selected_swatch is not None)
         if sync_picker and hasattr(self, 'color_picker'):
             self.color_picker.set_color(color, emit_signal=False)
+        
+        # Refresh all swatch styles to update current color highlighting
+        self._refresh_all_swatch_styles()
+
+    def _refresh_all_swatch_styles(self):
+        """Refresh styling for all swatches to update current color highlighting"""
+        for swatch in self.swatches:
+            swatch._apply_stylesheet()
+        if self.transparent_swatch:
+            self.transparent_swatch._apply_stylesheet()
 
     def _on_picker_color_changed(self, color: QColor):
         """Handle updates from the embedded color picker"""
