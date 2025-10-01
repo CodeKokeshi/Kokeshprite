@@ -5,7 +5,7 @@ Main Window for Kokeshprite Pixel Art Editor
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                             QMenuBar, QStatusBar, QLabel, QStackedWidget, QFileDialog, QDialog, QFormLayout, QSpinBox, QPushButton, QDialogButtonBox, QMessageBox)
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QKeySequence
+from PyQt6.QtGui import QAction, QKeySequence, QColor
 
 from .canvas import Canvas
 from .tools_panel import ToolsPanel
@@ -164,10 +164,22 @@ class MainWindow(QMainWindow):
         
         # Grid option with checkbox indicator
         self.grid_enabled = False  # Track grid state
+        self.grid_width = 16  # Default grid cell width
+        self.grid_height = 16  # Default grid cell height
+        self.grid_color = QColor(0x1c, 0x34, 0xff)  # Default grid color #1c34ff
+        
         self.grid_action = QAction('Grid', self)
         self.grid_action.triggered.connect(self.toggle_grid)
         self.update_grid_action_text()
         show_menu.addAction(self.grid_action)
+        
+        # Grid submenu
+        grid_menu = view_menu.addMenu('Grid')
+        
+        # Grid Settings option
+        grid_settings_action = QAction('Grid Settings...', self)
+        grid_settings_action.triggered.connect(self.show_grid_settings)
+        grid_menu.addAction(grid_settings_action)
 
         # Disable until a document is open
         self.set_edit_actions_enabled(False)
@@ -183,15 +195,33 @@ class MainWindow(QMainWindow):
             self.color_palette.sort_palette_by_method(method_name)
     
     def toggle_grid(self):
-        """Toggle the grid visibility state (visual checkbox only for now)."""
+        """Toggle the grid visibility state."""
         self.grid_enabled = not self.grid_enabled
         self.update_grid_action_text()
+        # Refresh canvas to show/hide grid
+        if hasattr(self, 'canvas'):
+            self.canvas.set_grid_settings(self.grid_enabled, self.grid_width, self.grid_height, self.grid_color)
         print(f"Grid {'enabled' if self.grid_enabled else 'disabled'}")
     
     def update_grid_action_text(self):
         """Update the grid action text with checkbox indicator."""
         checkbox = "☑" if self.grid_enabled else "☐"
         self.grid_action.setText(f"Grid {checkbox}")
+    
+    def show_grid_settings(self):
+        """Show the grid settings dialog."""
+        # Get canvas dimensions properly
+        canvas_width = self.canvas.canvas_width if hasattr(self, 'canvas') else 1024
+        canvas_height = self.canvas.canvas_height if hasattr(self, 'canvas') else 1024
+        
+        dialog = GridSettingsDialog(self.grid_width, self.grid_height, 
+                                   canvas_width, canvas_height, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.grid_width, self.grid_height = dialog.get_grid_size()
+            # Update canvas with new grid settings
+            if hasattr(self, 'canvas'):
+                self.canvas.set_grid_settings(self.grid_enabled, self.grid_width, self.grid_height, self.grid_color)
+            print(f"Grid settings updated: {self.grid_width}x{self.grid_height}")
         
     def create_status_bar(self):
         """Create the status bar"""
@@ -349,3 +379,44 @@ class MainWindow(QMainWindow):
             event.accept()
         else:
             event.ignore()
+
+
+class GridSettingsDialog(QDialog):
+    """Dialog for configuring grid settings"""
+    
+    def __init__(self, current_width, current_height, canvas_width, canvas_height, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Grid Settings")
+        self.setModal(True)
+        self.setFixedSize(300, 150)
+        
+        # Store canvas dimensions for validation
+        self.max_width = canvas_width
+        self.max_height = canvas_height
+        
+        # Create layout
+        layout = QFormLayout(self)
+        
+        # Grid width input
+        self.width_spinbox = QSpinBox()
+        self.width_spinbox.setRange(1, self.max_width)
+        self.width_spinbox.setValue(current_width)
+        self.width_spinbox.setSuffix(" px")
+        layout.addRow("Grid Width:", self.width_spinbox)
+        
+        # Grid height input
+        self.height_spinbox = QSpinBox()
+        self.height_spinbox.setRange(1, self.max_height)
+        self.height_spinbox.setValue(current_height)
+        self.height_spinbox.setSuffix(" px")
+        layout.addRow("Grid Height:", self.height_spinbox)
+        
+        # Buttons
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+    
+    def get_grid_size(self):
+        """Return the selected grid width and height"""
+        return self.width_spinbox.value(), self.height_spinbox.value()

@@ -46,6 +46,12 @@ class Canvas(QGraphicsView):
         # Enable mouse tracking for cursor preview
         self.setMouseTracking(True)
         
+        # Grid properties
+        self.grid_enabled = False
+        self.grid_width = 16  # Grid cell width in pixels
+        self.grid_height = 16  # Grid cell height in pixels
+        self.grid_color = QColor(0x1c, 0x34, 0xff)  # Default grid color #1c34ff
+        
         # Enable key press events
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         # Track last mouse position for dynamic cursor (eraser inverse preview)
@@ -91,6 +97,48 @@ class Canvas(QGraphicsView):
         
         # Update cursor for initial tool
         self.update_cursor()
+    
+    def set_grid_settings(self, enabled, width, height, color):
+        """Update grid settings and refresh display"""
+        self.grid_enabled = enabled
+        self.grid_width = width
+        self.grid_height = height
+        self.grid_color = color
+        # Force redraw of the view to show/hide grid
+        self.viewport().update()
+    
+    def drawForeground(self, painter, rect):
+        """Draw grid overlay on top of the canvas"""
+        if not self.grid_enabled:
+            return
+        
+        # Only draw grid within the canvas bounds
+        canvas_rect = self.pixmap_item.boundingRect()
+        
+        # Set up grid pen
+        grid_pen = QPen(self.grid_color)
+        grid_pen.setWidth(0)  # Cosmetic pen (always 1 pixel regardless of zoom)
+        painter.setPen(grid_pen)
+        
+        # Calculate grid lines
+        start_x = int(canvas_rect.left())
+        start_y = int(canvas_rect.top())
+        end_x = int(canvas_rect.right())
+        end_y = int(canvas_rect.bottom())
+        
+        # Draw vertical grid lines
+        x = start_x
+        while x <= end_x:
+            if x >= start_x and x <= end_x:
+                painter.drawLine(x, start_y, x, end_y)
+            x += self.grid_width
+        
+        # Draw horizontal grid lines
+        y = start_y
+        while y <= end_y:
+            if y >= start_y and y <= end_y:
+                painter.drawLine(start_x, y, end_x, y)
+            y += self.grid_height
         
     def update_cursor(self):
         """Update the cursor based on current tool and settings"""
