@@ -46,6 +46,9 @@ class Canvas(QGraphicsView):
         # Enable mouse tracking for cursor preview
         self.setMouseTracking(True)
         
+        # Transparency background resources
+        self._transparency_tile = self._create_transparency_tile()
+
         # Grid properties
         self.grid_enabled = False
         self.grid_width = 16  # Grid cell width in pixels
@@ -77,7 +80,7 @@ class Canvas(QGraphicsView):
         
         # Create the pixmap for drawing
         self.pixmap = QPixmap(self.canvas_width, self.canvas_height)
-        self.pixmap.fill(Qt.GlobalColor.white)  # White background
+        self.pixmap.fill(Qt.GlobalColor.transparent)
         
         # Add pixmap to scene
         self.pixmap_item = QGraphicsPixmapItem(self.pixmap)
@@ -106,6 +109,39 @@ class Canvas(QGraphicsView):
         self.grid_color = color
         # Force redraw of the view to show/hide grid
         self.viewport().update()
+        if hasattr(self, 'pixmap_item'):
+            self.scene.update(self.pixmap_item.boundingRect())
+
+    def _create_transparency_tile(self) -> QPixmap:
+        tile_size = 32  # Two 16x16 squares per side
+        cell = 16
+        pixmap = QPixmap(tile_size, tile_size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        light = QColor(110, 110, 110)
+        dark = QColor(70, 70, 70)
+        for y in range(0, tile_size, cell):
+            for x in range(0, tile_size, cell):
+                color = light if ((x // cell + y // cell) % 2 == 0) else dark
+                painter.fillRect(x, y, cell, cell, color)
+        painter.end()
+        return pixmap
+
+    def drawBackground(self, painter, rect):
+        """Render transparency checkerboard behind the canvas"""
+        painter.fillRect(rect, QColor(40, 40, 40))
+        if not hasattr(self, 'pixmap_item'):
+            return
+        if self._transparency_tile is None:
+            self._transparency_tile = self._create_transparency_tile()
+        canvas_rect = self.pixmap_item.boundingRect()
+        target = rect.intersected(canvas_rect)
+        if target.isEmpty():
+            return
+        painter.save()
+        painter.setClipRect(target)
+        painter.drawTiledPixmap(target, self._transparency_tile, canvas_rect.topLeft())
+        painter.restore()
     
     def drawForeground(self, painter, rect):
         """Draw grid overlay on top of the canvas"""
@@ -532,45 +568,24 @@ class Canvas(QGraphicsView):
     def erase_brush_stroke(self, x, y):
         """Erase with the brush tool using current size and shape"""
         painter = QPainter(self.pixmap)
-        painter.setPen(QPen(QColor(255, 255, 255), 1))  # White color
-        painter.setBrush(QBrush(QColor(255, 255, 255)))  # White brush
-        
-        # Apply pixel perfect snapping if enabled
+        painter.setCompositionMode(QPainter.CompositionMode.Clear)
+
         if self.pixel_perfect:
             x = round(x)
             y = round(y)
-        
+
         if self.brush_size == 1:
-            # Single pixel - only erase if within bounds
             if 0 <= x < self.canvas_width and 0 <= y < self.canvas_height:
-                painter.drawPoint(x, y)
+                painter.fillRect(int(x), int(y), 1, 1, Qt.GlobalColor.transparent)
         else:
-            # Multi-pixel eraser - erase even if center is outside, but clip to canvas
-            radius = self.brush_size // 2
-            
-            # Calculate brush bounds
-            brush_left = x - radius
-            brush_top = y - radius
-            brush_right = x + radius
-            brush_bottom = y + radius
-            
-            # Check if brush overlaps with canvas at all
-            if (brush_right >= 0 and brush_left < self.canvas_width and 
-                brush_bottom >= 0 and brush_top < self.canvas_height):
-                
-                # Set clipping to canvas bounds
-                painter.setClipRect(0, 0, self.canvas_width, self.canvas_height)
-                
-                if self.brush_shape == "circle":
-                    # Draw circle eraser
-                    painter.drawEllipse(x - radius, y - radius, self.brush_size, self.brush_size)
-                else:  # square
-                    # Draw square eraser
-                    painter.drawRect(x - radius, y - radius, self.brush_size, self.brush_size)
-        
+            size = int(self.brush_size)
+            for dx, dy in self._brush_mask(size, self.brush_shape):
+                px = int(x + dx)
+                py = int(y + dy)
+                if 0 <= px < self.canvas_width and 0 <= py < self.canvas_height:
+                    painter.fillRect(px, py, 1, 1, Qt.GlobalColor.transparent)
+
         painter.end()
-        
-        # Update the display
         self.pixmap_item.setPixmap(self.pixmap)
         
     def erase_brush_line(self, x1, y1, x2, y2):
@@ -605,11 +620,10 @@ class Canvas(QGraphicsView):
     def erase_line(self, x1, y1, x2, y2):
         """Erase a line (make it white)"""
         painter = QPainter(self.pixmap)
-        painter.setPen(QPen(QColor(255, 255, 255), 1))  # White color
+        painter.setCompositionMode(QPainter.CompositionMode.Clear)
+        painter.setPen(QPen(Qt.GlobalColor.transparent, 1))
         painter.drawLine(x1, y1, x2, y2)
         painter.end()
-        
-        # Update the display
         self.pixmap_item.setPixmap(self.pixmap)
         
     def bucket_fill(self, x, y):
@@ -627,7 +641,10 @@ class Canvas(QGraphicsView):
         if target_color == fill_color:
             return
         
-        print(f"Bucket fill: target={target_color.name()}, fill={fill_color.name()}")  # Debug
+        print(
+            f"Bucket fill: target={target_color.name(QColor.NameFormat.HexArgb)}, "
+            f"fill={fill_color.name(QColor.NameFormat.HexArgb)}"
+        )  # Debug
             
         # Use a queue-based flood fill algorithm (more efficient)
         from collections import deque
@@ -668,7 +685,7 @@ class Canvas(QGraphicsView):
         """Handle color picked from system eyedropper"""
         self.current_color = color
         self.color_picked.emit(color)
-        print(f"System eyedropper picked color: {color.name()}")
+        print(f"System eyedropper picked color: {color.name(QColor.NameFormat.HexArgb)}")
         
     def update_brush_settings(self, settings):
         """Update brush settings from options panel"""
@@ -713,10 +730,11 @@ class Canvas(QGraphicsView):
         
     def clear_canvas(self):
         """Clear the entire canvas"""
-        self.pixmap.fill(Qt.GlobalColor.white)
+        self.pixmap.fill(Qt.GlobalColor.transparent)
         self.pixmap_item.setPixmap(self.pixmap)
         self.history.push(self.pixmap)
         self.modified.emit()
+        self.viewport().update()
 
     # --------------- Dynamic Canvas Management ---------------
     def resize_canvas(self, width: int, height: int):
@@ -726,13 +744,14 @@ class Canvas(QGraphicsView):
         self.canvas_width = width
         self.canvas_height = height
         self.pixmap = QPixmap(self.canvas_width, self.canvas_height)
-        self.pixmap.fill(Qt.GlobalColor.white)
+        self.pixmap.fill(Qt.GlobalColor.transparent)
         self.pixmap_item.setPixmap(self.pixmap)
         self._update_scene_rect()
         self.centerOn(self.pixmap_item)
         if hasattr(self, 'history'):
             self.history.push(self.pixmap)
         self.modified.emit()
+        self.viewport().update()
 
     def load_image(self, qimage):
         """Load a QImage into the canvas (auto-resize)."""

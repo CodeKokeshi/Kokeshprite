@@ -3,47 +3,93 @@ Color Palette Panel for Kokeshprite
 Contains color swatches and palette management
 """
 
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
                             QPushButton, QLabel, QFrame, QScrollArea, QInputDialog,
-                            QMessageBox, QColorDialog, QFileDialog)
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont
+                            QMessageBox, QFileDialog, QSizePolicy, QLineEdit)
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtGui import QColor, QFont, QPixmap, QPainter, QIcon
 import random
+import math
+
+from .color_picker_widget import ColorPickerWidget
 
 SWATCH_SIZE = 22  # Reduced from previous 30 for more compact UI
 
 class ColorSwatch(QPushButton):
     """Individual color swatch button"""
+
+    _checkerboard_base = None
+    _checker_dark = QColor(70, 70, 70)
+    _checker_light = QColor(110, 110, 110)
+    _checker_tile = 4
     
-    def __init__(self, color=QColor(255, 255, 255)):
+    def __init__(self, color=QColor(255, 255, 255, 255)):
         super().__init__()
-        self.color = color
+        self.color = QColor(color)
+        self._selected = False
         self.setFixedSize(SWATCH_SIZE, SWATCH_SIZE)
+        self.setIconSize(QSize(SWATCH_SIZE, SWATCH_SIZE))
         self.update_color()
-        self.setToolTip("Click to select, double-click to edit")
         
     def update_color(self):
         """Update the swatch appearance"""
-        self.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {self.color.name()};
-                border: 2px solid #ccc;
-                border-radius: 3px;
-            }}
-            QPushButton:hover {{
-                border-color: #007acc;
-                border-width: 3px;
-            }}
-            QPushButton:pressed {{
-                border-color: #005a9e;
-                border-width: 3px;
-            }}
-        """)
+        if ColorSwatch._checkerboard_base is None:
+            ColorSwatch._checkerboard_base = self._create_checkerboard_pixmap()
+        pixmap = QPixmap(ColorSwatch._checkerboard_base)
+        painter = QPainter(pixmap)
+        painter.fillRect(pixmap.rect(), self.color)
+        painter.end()
+        self.setIcon(QIcon(pixmap))
+        self._apply_stylesheet()
+        hex_argb = self.color.name(QColor.NameFormat.HexArgb).upper()
+        self.setToolTip(
+            f"Click to select, double-click to edit\n{hex_argb} | RGBA({self.color.red()}, {self.color.green()}, {self.color.blue()}, {self.color.alpha()})"
+        )
         
     def set_color(self, color):
         """Set the color of this swatch"""
-        self.color = color
+        self.color = QColor(color)
         self.update_color()
+
+    def set_selected(self, selected: bool):
+        if self._selected != selected:
+            self._selected = selected
+            self._apply_stylesheet()
+
+    def _apply_stylesheet(self):
+        if self._selected:
+            border_color = "#f1c232"
+            border_width = 3
+        else:
+            border_color = "#b8b8b8"
+            border_width = 2
+        self.setStyleSheet(f"""
+            QPushButton {{
+                border: {border_width}px solid {border_color};
+                border-radius: 4px;
+                background-color: transparent;
+            }}
+            QPushButton:hover {{
+                border: 3px solid #3daee9;
+            }}
+            QPushButton:pressed {{
+                border: 3px solid #1e6ca1;
+            }}
+        """)
+
+    @classmethod
+    def _create_checkerboard_pixmap(cls) -> QPixmap:
+        size = SWATCH_SIZE
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        tile = cls._checker_tile
+        for y in range(0, size, tile):
+            for x in range(0, size, tile):
+                color = cls._checker_light if ((x // tile + y // tile) % 2 == 0) else cls._checker_dark
+                painter.fillRect(x, y, tile, tile, color)
+        painter.end()
+        return pixmap
     def mouseDoubleClickEvent(self, event):
         # Emit a custom signal via parent palette by using event bubbling if needed
         # We'll let the parent intercept by installing an event filter or simpler: call back
@@ -54,7 +100,7 @@ class ColorSwatch(QPushButton):
             parent.edit_swatch_color(self)
         super().mouseDoubleClickEvent(event)
 
-class ColorPalettePanel(QScrollArea):
+class ColorPalettePanel(QWidget):
     """Color palette panel with expandable colors"""
     
     # Signal emitted when color is selected
@@ -65,25 +111,21 @@ class ColorPalettePanel(QScrollArea):
         self.colors = []
         self.swatches = []
         self.selected_swatch = None
+        self.max_columns = 8
         self.init_ui()
         
     def init_ui(self):
         """Initialize the color palette UI"""
-        # Set fixed width and scroll properties
-        # Width dynamic: 4 columns + margins; extra padding so vertical scrollbar never overlaps content
-        # Previous: +36; increased slightly for better clearance
-        self.setFixedWidth((SWATCH_SIZE * 4) + 48)
-        self.setWidgetResizable(True)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        
-        # Create main widget and layout
-        main_widget = QWidget()
-        self.setWidget(main_widget)
-        
-        self.main_layout = QVBoxLayout(main_widget)
-        self.main_layout.setContentsMargins(10, 10, 10, 10)
-        self.main_layout.setSpacing(10)
+        # RESPONSIVE: Use preferred width instead of fixed
+        preferred_width = (SWATCH_SIZE * self.max_columns) + 40
+        self.setMinimumWidth(preferred_width)
+        self.setMaximumWidth(preferred_width + 60)  # Allow some growth
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+
+        self.main_layout = QVBoxLayout(self)
+        # RESPONSIVE: Smaller margins when space is limited
+        self.main_layout.setContentsMargins(8, 5, 8, 5)
+        self.main_layout.setSpacing(6)  # Reduced spacing for better fit
         
         # Color palette title
         title = QLabel("Color Palette")
@@ -105,9 +147,77 @@ class ColorPalettePanel(QScrollArea):
         self.main_layout.addWidget(self.current_color_label)
         
         # Current color swatch
-        self.current_color_swatch = ColorSwatch(QColor(0, 0, 0))  # Black default
+        self.current_color_swatch = ColorSwatch(QColor(0, 0, 0, 255))  # Black default
         self.main_layout.addWidget(self.current_color_swatch)
+        self._update_current_color_label(self.current_color_swatch.color)
         
+        # Inline color picker
+        self.color_picker = ColorPickerWidget()
+        self.color_picker.colorChanged.connect(self._on_picker_color_changed)
+        # Ensure color picker fits within panel width
+        self.color_picker.setMaximumWidth((SWATCH_SIZE * self.max_columns) + 20)
+        self.main_layout.addWidget(self.color_picker)
+
+        # SEPARATE FLOOR: Hex input (BEFORE buttons!) - created here, not in color picker
+        hex_layout = QHBoxLayout()
+        hex_layout.addWidget(QLabel("Hex:"))
+        self.hex_input = QLineEdit()
+        self.hex_input.setPlaceholderText("#RRGGBBAA")
+        from PyQt6.QtCore import QRegularExpression
+        from PyQt6.QtGui import QRegularExpressionValidator
+        validator = QRegularExpressionValidator(QRegularExpression(r"^#?[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$"))
+        self.hex_input.setValidator(validator)
+        self.hex_input.returnPressed.connect(self._on_hex_entered)
+        hex_layout.addWidget(self.hex_input)
+        self.main_layout.addLayout(hex_layout)
+
+        # Add spacing between hex and buttons
+        self.main_layout.addSpacing(8)
+
+        # Picker controls (AFTER hex input!)
+        picker_controls = QVBoxLayout()
+        picker_controls.setSpacing(6)
+        self.apply_picker_button = QPushButton("Apply to Selected")
+        self.apply_picker_button.setToolTip("Apply the picker color to the selected swatch")
+        self.apply_picker_button.clicked.connect(self.apply_color_to_selected_swatch)
+        self.apply_picker_button.setEnabled(False)
+
+        self.add_picker_button = QPushButton("Add Swatch")
+        self.add_picker_button.setToolTip("Add the picker color as a new swatch")
+        self.add_picker_button.clicked.connect(self.add_picker_color_to_palette)
+
+        for btn in (self.apply_picker_button, self.add_picker_button):
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            btn.setFixedHeight(30)  # Same height, but expanding width for uniformity
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #444;
+                    color: white;
+                    border: none;
+                    padding: 6px 10px;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }
+                QPushButton:disabled {
+                    background-color: #666;
+                    color: #bbb;
+                }
+                QPushButton:hover:!disabled {
+                    background-color: #555;
+                }
+                QPushButton:pressed:!disabled {
+                    background-color: #333;
+                }
+            """)
+
+        picker_controls.addWidget(self.apply_picker_button)
+        picker_controls.addWidget(self.add_picker_button)
+        picker_controls.addStretch(1)
+        self.main_layout.addLayout(picker_controls)
+        
+        # Add spacing to separate from palette section
+        self.main_layout.addSpacing(15)
+
         # Add another separator
         line2 = QFrame()
         line2.setFrameShape(QFrame.Shape.HLine)
@@ -118,11 +228,36 @@ class ColorPalettePanel(QScrollArea):
         palette_label = QLabel("Palette Colors:")
         self.main_layout.addWidget(palette_label)
         
-        # Color grid container
+        # Color grid container with dedicated scroll area
+        self.swatch_scroll_area = QScrollArea()
+        self.swatch_scroll_area.setWidgetResizable(True)
+        self.swatch_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.swatch_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.swatch_scroll_area.setFrameShape(QFrame.Shape.Box)  # Add visible border
+        self.swatch_scroll_area.setLineWidth(1)
+        self.swatch_scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: 1px solid #666;
+                border-radius: 4px;
+                background-color: #333;
+            }
+        """)
+        # Calculate proper height: 4 rows of swatches + some padding (smaller, we have scrollbars)
+        proper_height = (SWATCH_SIZE * 4) + 16  # 4 rows max visible + padding
+        self.swatch_scroll_area.setFixedHeight(proper_height)
+        self.swatch_scroll_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.swatch_scroll_area.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+
         self.color_grid_widget = QWidget()
+        self.color_grid_widget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         self.color_grid = QGridLayout(self.color_grid_widget)
-        self.color_grid.setSpacing(1)
-        self.main_layout.addWidget(self.color_grid_widget)
+        self.color_grid.setContentsMargins(0, 0, 0, 0)
+        self.color_grid.setHorizontalSpacing(0)
+        self.color_grid.setVerticalSpacing(0)
+        self.color_grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.swatch_scroll_area.setWidget(self.color_grid_widget)
+
+        self.main_layout.addWidget(self.swatch_scroll_area)
         
         # Add colors button
         self.add_button = QPushButton("➕ Add Colors")
@@ -210,20 +345,17 @@ class ColorPalettePanel(QScrollArea):
             
     def add_color_to_palette(self, color):
         """Add a single color to the palette"""
-        self.colors.append(color)
+        self.colors.append(QColor(color))
         
         # Create swatch
         swatch = ColorSwatch(color)
         # Connect using swatch instance so edited color is picked up dynamically
         def handle_click(checked=False, s=swatch):
-            self.select_color(s.color)
+            self.select_color(s.color, s)
         swatch.clicked.connect(handle_click)
+        swatch.set_selected(False)
         self.swatches.append(swatch)
-        
-        # Add to grid (4 columns)
-        row = (len(self.swatches) - 1) // 4
-        col = (len(self.swatches) - 1) % 4
-        self.color_grid.addWidget(swatch, row, col)
+        self._refresh_swatch_grid()
         
     def add_colors(self):
         """Add more colors to the palette"""
@@ -244,49 +376,119 @@ class ColorPalettePanel(QScrollArea):
                 r = random.randint(0, 255)
                 g = random.randint(0, 255)
                 b = random.randint(0, 255)
-                color = QColor(r, g, b)
+                color = QColor(r, g, b, 255)
                 self.add_color_to_palette(color)
                 
             print(f"Added {count} random colors to palette")
+
+    def _refresh_swatch_grid(self):
+        while self.color_grid.count():
+            item = self.color_grid.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(self.color_grid_widget)
+
+        total = len(self.swatches)
+        columns = max(1, min(self.max_columns, total if total > 0 else 1))
+        rows = max(1, math.ceil(total / columns)) if total else 1
+
+        for index, swatch in enumerate(self.swatches):
+            row = index // columns
+            col = index % columns
+            self.color_grid.addWidget(swatch, row, col)
+        self.color_grid_widget.adjustSize()
+
+    def add_picker_color_to_palette(self):
+        """Add the current picker color as a new swatch"""
+        color = self.color_picker.current_color()
+        self.add_color_to_palette(color)
+        self.select_color(color, self.swatches[-1])
+
+    def apply_color_to_selected_swatch(self):
+        """Apply picker color to the currently selected swatch"""
+        if not self.selected_swatch:
+            return
+
+        updated_color = self.color_picker.current_color()
+        self.selected_swatch.set_color(updated_color)
+        try:
+            idx = self.swatches.index(self.selected_swatch)
+            self.colors[idx] = QColor(updated_color)
+        except ValueError:
+            pass
+
+        self.set_current_color(updated_color, sync_picker=False)
+        self.color_selected.emit(updated_color)
             
-    def select_color(self, color):
+    def select_color(self, color, swatch: ColorSwatch | None = None):
         """Select a color from the palette"""
-        # Find swatch matching color (first match) to set selected_swatch reference
-        # If user clicked a swatch, click handler already supplies its current color; we map swatch by color attribute
-        for sw in self.swatches:
-            if sw.color == color:
-                self.selected_swatch = sw
-                break
-        self.current_color_swatch.set_color(color)
+        if swatch is not None and swatch not in self.swatches:
+            swatch = None
+
+        if swatch is None:
+            for candidate in self.swatches:
+                if candidate.color == color:
+                    swatch = candidate
+                    break
+
+        if self.selected_swatch and self.selected_swatch is not swatch:
+            self.selected_swatch.set_selected(False)
+
+        self.selected_swatch = swatch
+
+        if self.selected_swatch:
+            self.selected_swatch.set_selected(True)
+
+        if hasattr(self, 'apply_picker_button'):
+            self.apply_picker_button.setEnabled(self.selected_swatch is not None)
+
+        self.set_current_color(color)
         self.color_selected.emit(color)
-        print(f"Selected color: {color.name()}")
+        print(f"Selected color: {color.name(QColor.NameFormat.HexArgb)}")
 
     def edit_swatch_color(self, swatch):
-        """Open a QColorDialog to edit a swatch's color and update palette list"""
-        initial = swatch.color
-        new_color = QColorDialog.getColor(initial, self, "Edit Color")
-        if new_color.isValid():
-            swatch.set_color(new_color)
-            # Update internal colors list to keep in sync
-            try:
-                idx = self.swatches.index(swatch)
-                self.colors[idx] = new_color
-            except ValueError:
-                pass
-            # If edited swatch was current, update current display
-            if self.selected_swatch is swatch:
-                # Auto-update current color and emit so brush updates
-                self.set_current_color(new_color)
-                self.color_selected.emit(new_color)
-            print(f"Edited swatch color -> {new_color.name()}")
+        """Focus the inline picker for editing a swatch"""
+        self.select_color(swatch.color, swatch)
+        self.color_picker.set_color(swatch.color, emit_signal=False)
+        self.color_picker.focus_hex_input()
         
-    def set_current_color(self, color):
-        """Set the current color (from eyedropper, etc.)"""
+    def set_current_color(self, color, sync_picker: bool = True):
+        """Set the current color (from eyedropper, picker, etc.)"""
         self.current_color_swatch.set_color(color)
+        self._update_current_color_label(color)
+        if (not self.selected_swatch) or (self.selected_swatch.color != color):
+            match = next((sw for sw in self.swatches if sw.color == color), None)
+            if match is not None:
+                if self.selected_swatch and self.selected_swatch is not match:
+                    self.selected_swatch.set_selected(False)
+                self.selected_swatch = match
+                self.selected_swatch.set_selected(True)
+        if hasattr(self, 'apply_picker_button'):
+            self.apply_picker_button.setEnabled(self.selected_swatch is not None)
+        if sync_picker and hasattr(self, 'color_picker'):
+            self.color_picker.set_color(color, emit_signal=False)
+
+    def _on_picker_color_changed(self, color: QColor):
+        """Handle updates from the embedded color picker"""
+        self.set_current_color(color, sync_picker=False)
+        self.color_selected.emit(color)
+        
+    def _on_hex_entered(self):
+        """Handle hex input changes"""
+        text = self.hex_input.text().lstrip('#')
+        if len(text) == 6:
+            text += 'FF'
+        color = QColor('#' + text)
+        if color.isValid():
+            self.color_picker.set_color(color, emit_signal=True)
         
     def get_current_color(self):
         """Get the currently selected color"""
         return self.current_color_swatch.color
+
+    def _update_current_color_label(self, color: QColor):
+        hex_value = color.name(QColor.NameFormat.HexArgb).upper()
+        self.current_color_label.setText(f"Current Color: {hex_value}")
 
     # -------------- Palette Import (.hex) --------------
     def import_hex_palette(self):
@@ -317,13 +519,16 @@ class ColorPalettePanel(QScrollArea):
                 token = line[1:]
             else:
                 token = line
-            if len(token) != 6 or any(c not in '0123456789aAbBcCdDeEfF' for c in token):
+            if len(token) not in (6, 8) or any(c not in '0123456789aAbBcCdDeEfF' for c in token):
                 # Not a valid color spec; skip silently (or we could warn)
                 continue
             r = int(token[0:2], 16)
             g = int(token[2:4], 16)
             b = int(token[4:6], 16)
-            parsed_colors.append(QColor(r, g, b))
+            a = 255
+            if len(token) == 8:
+                a = int(token[6:8], 16)
+            parsed_colors.append(QColor(r, g, b, a))
 
         if not parsed_colors:
             QMessageBox.information(self, "No Colors", "No valid hex colors found in file.")
@@ -340,6 +545,10 @@ class ColorPalettePanel(QScrollArea):
         for sw in self.swatches:
             sw.setParent(None)
         self.swatches.clear()
+        self.selected_swatch = None
+        if hasattr(self, 'apply_picker_button'):
+            self.apply_picker_button.setEnabled(False)
+            self._refresh_swatch_grid()
         # Re-add all colors
         for c in colors:
             self.add_color_to_palette(c)
