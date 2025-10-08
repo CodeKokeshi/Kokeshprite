@@ -21,6 +21,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.current_file_path: str | None = None
         self.document_modified: bool = False
+        
+        # Initialize background settings early
+        self.background_tile_size = 2  # Default 2x2 tile size
+        
         self.init_ui()
         
     def init_ui(self):
@@ -69,6 +73,9 @@ class MainWindow(QMainWindow):
         self.canvas.color_picked.connect(self.color_palette.set_current_color)
         self.options_panel.brush_settings_changed.connect(self.canvas.update_brush_settings)
         self.canvas.modified.connect(self.on_canvas_modified)
+
+        # Initialize canvas settings
+        self.canvas.set_background_tile_size(self.background_tile_size)
 
         # Create menu bar & status bar
         self.create_menu_bar()
@@ -181,6 +188,14 @@ class MainWindow(QMainWindow):
         grid_settings_action.triggered.connect(self.show_grid_settings)
         grid_menu.addAction(grid_settings_action)
 
+        # Background submenu
+        background_menu = view_menu.addMenu('Background')
+        
+        # Background Settings option
+        background_settings_action = QAction('Background Settings...', self)
+        background_settings_action.triggered.connect(self.show_background_settings)
+        background_menu.addAction(background_settings_action)
+
         # Disable until a document is open
         self.set_edit_actions_enabled(False)
 
@@ -222,6 +237,16 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'canvas'):
                 self.canvas.set_grid_settings(self.grid_enabled, self.grid_width, self.grid_height, self.grid_color)
             print(f"Grid settings updated: {self.grid_width}x{self.grid_height}")
+    
+    def show_background_settings(self):
+        """Show the background settings dialog."""
+        dialog = BackgroundSettingsDialog(self.background_tile_size, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.background_tile_size = dialog.get_tile_size()
+            # Update canvas with new background settings
+            if hasattr(self, 'canvas'):
+                self.canvas.set_background_tile_size(self.background_tile_size)
+            print(f"Background settings updated: {self.background_tile_size}x{self.background_tile_size} tile size")
         
     def create_status_bar(self):
         """Create the status bar"""
@@ -420,3 +445,62 @@ class GridSettingsDialog(QDialog):
     def get_grid_size(self):
         """Return the selected grid width and height"""
         return self.width_spinbox.value(), self.height_spinbox.value()
+
+
+class BackgroundSettingsDialog(QDialog):
+    """Dialog for configuring checkered background settings"""
+    
+    def __init__(self, current_tile_size, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Background Settings")
+        self.setModal(True)
+        self.setFixedSize(350, 200)
+        
+        # Create layout
+        layout = QFormLayout(self)
+        
+        # Add description
+        description = QLabel("Configure the checkered background pattern:")
+        description.setStyleSheet("color: #666; margin-bottom: 10px;")
+        layout.addRow(description)
+        
+        # Tile size input
+        self.tile_size_spinbox = QSpinBox()
+        self.tile_size_spinbox.setRange(1, 32)  # Reasonable range for tile sizes
+        self.tile_size_spinbox.setValue(current_tile_size)
+        self.tile_size_spinbox.setSuffix(" px")
+        self.tile_size_spinbox.setToolTip("Size of each checkerboard tile in canvas pixels")
+        layout.addRow("Tile Size:", self.tile_size_spinbox)
+        
+        # Add some preset buttons for common sizes
+        presets_label = QLabel("Presets:")
+        layout.addRow(presets_label)
+        
+        presets_widget = QWidget()
+        presets_layout = QHBoxLayout(presets_widget)
+        presets_layout.setContentsMargins(0, 0, 0, 0)
+        
+        preset_sizes = [1, 2, 4, 8, 16]
+        for size in preset_sizes:
+            btn = QPushButton(f"{size}x{size}")
+            btn.setFixedWidth(50)
+            btn.clicked.connect(lambda _, s=size: self.tile_size_spinbox.setValue(s))
+            presets_layout.addWidget(btn)
+        
+        presets_layout.addStretch(1)
+        layout.addRow(presets_widget)
+        
+        # Add explanation
+        explanation = QLabel("Smaller values create a finer pattern.\nLarger values create bigger checkerboard squares.")
+        explanation.setStyleSheet("color: #888; font-size: 11px; margin-top: 10px;")
+        layout.addRow(explanation)
+        
+        # Buttons
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+    
+    def get_tile_size(self):
+        """Return the selected tile size"""
+        return self.tile_size_spinbox.value()

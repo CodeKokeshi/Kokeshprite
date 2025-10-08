@@ -45,15 +45,15 @@ class Canvas(QGraphicsView):
         
         # Enable mouse tracking for cursor preview
         self.setMouseTracking(True)
-        
-        # Transparency background resources
-        self._transparency_tile = self._create_transparency_tile()
 
         # Grid properties
         self.grid_enabled = False
         self.grid_width = 16  # Grid cell width in pixels
         self.grid_height = 16  # Grid cell height in pixels
         self.grid_color = QColor(0x1c, 0x34, 0xff)  # Default grid color #1c34ff
+        
+        # Background properties
+        self.background_tile_size = 2  # Default 2x2 tile size for checkerboard
         
         # Enable key press events
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -112,35 +112,56 @@ class Canvas(QGraphicsView):
         if hasattr(self, 'pixmap_item'):
             self.scene.update(self.pixmap_item.boundingRect())
 
-    def _create_transparency_tile(self) -> QPixmap:
-        tile_size = 32  # Two 16x16 squares per side
-        cell = 16
-        pixmap = QPixmap(tile_size, tile_size)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        light = QColor(110, 110, 110)
-        dark = QColor(70, 70, 70)
-        for y in range(0, tile_size, cell):
-            for x in range(0, tile_size, cell):
-                color = light if ((x // cell + y // cell) % 2 == 0) else dark
-                painter.fillRect(x, y, cell, cell, color)
-        painter.end()
-        return pixmap
+    def set_background_tile_size(self, tile_size):
+        """Update background tile size and refresh display"""
+        self.background_tile_size = max(1, min(32, tile_size))  # Clamp to reasonable range
+        # Force redraw of the view to update background
+        self.viewport().update()
+        if hasattr(self, 'pixmap_item'):
+            self.scene.update(self.pixmap_item.boundingRect())
 
     def drawBackground(self, painter, rect):
         """Render transparency checkerboard behind the canvas"""
         painter.fillRect(rect, QColor(40, 40, 40))
         if not hasattr(self, 'pixmap_item'):
             return
-        if self._transparency_tile is None:
-            self._transparency_tile = self._create_transparency_tile()
+        
+        # Get canvas bounds
         canvas_rect = self.pixmap_item.boundingRect()
         target = rect.intersected(canvas_rect)
         if target.isEmpty():
             return
+        
+        # Draw checkerboard pattern that represents actual canvas pixels
         painter.save()
         painter.setClipRect(target)
-        painter.drawTiledPixmap(target, self._transparency_tile, canvas_rect.topLeft())
+        
+        # Checkerboard colors
+        light = QColor(110, 110, 110)
+        dark = QColor(70, 70, 70)
+        
+        # Use configurable tile size for checkerboard pattern
+        start_x = int(canvas_rect.left())
+        start_y = int(canvas_rect.top())
+        end_x = int(canvas_rect.right())
+        end_y = int(canvas_rect.bottom())
+        
+        # Use configurable tile size instead of fixed 2x2
+        tile_size = self.background_tile_size
+        
+        # Draw checkerboard pattern based on configurable tile size
+        for y in range(start_y, end_y, tile_size):
+            for x in range(start_x, end_x, tile_size):
+                # Checkerboard pattern based on tile grid
+                cell_x = x // tile_size
+                cell_y = y // tile_size
+                color = light if ((cell_x + cell_y) % 2 == 0) else dark
+                
+                # Draw tile block, but respect canvas boundaries
+                block_width = min(tile_size, end_x - x)
+                block_height = min(tile_size, end_y - y)
+                painter.fillRect(x, y, block_width, block_height, color)
+        
         painter.restore()
     
     def drawForeground(self, painter, rect):
@@ -194,8 +215,9 @@ class Canvas(QGraphicsView):
             self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
             
     def create_brush_cursor(self):
-        """Create a pixel-perfect cursor preview using the actual brush mask.
-        Each mask pixel -> filled square scaled to current zoom, matching stamping footprint.
+        """Create clean cursor preview without rectangular containers:
+        - Brush: Clean filled pixels showing exact color
+        - Eraser: Individual pixel outlines showing exact erase area
         """
         current_scale = self.transform().m11()
         size = self.brush_size
@@ -212,70 +234,74 @@ class Canvas(QGraphicsView):
 
         # Pixel cell size on screen
         cell = max(1, int(round(current_scale)))
-        # Add 1px outline margin for visibility
-        padding = 2
+        # Minimal padding - just enough to not clip
+        padding = 1
         pixmap = QPixmap(mask_w * cell + padding * 2, mask_h * cell + padding * 2)
         pixmap.fill(Qt.GlobalColor.transparent)
 
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-
-        # Common outline colors
-        outline_color = QColor(255, 255, 255, 220)
-        void_outline = QColor(0, 0, 0, 220)
-        painter.setPen(Qt.PenStyle.NoPen)
         occupied = set(mask)
 
         if self.current_tool == 'eraser':
-            # Dynamic per-pixel inverse preview of underlying canvas content
+            # ERASER: Show only the OUTER edges of border pixels
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            
+            # Get the underlying canvas colors for negation
             img = self.pixmap.toImage()
             cx, cy = self._last_cursor_pos
-            preview_alpha = 180
+            
+            # Draw only the outer edges of each border pixel
             for dx, dy in occupied:
+                sx = (dx - min_dx) * cell + padding
+                sy = (dy - min_dy) * cell + padding
+                
+                # Get the color behind this pixel for negation
                 px = int(cx + dx)
                 py = int(cy + dy)
                 if 0 <= px < self.canvas_width and 0 <= py < self.canvas_height:
-                    base = img.pixelColor(px, py)
+                    base_color = img.pixelColor(px, py)
+                    neg_color = QColor(255 - base_color.red(), 255 - base_color.green(), 255 - base_color.blue(), 255)
                 else:
-                    base = QColor(255, 255, 255)  # treat OOB as white
-                inv = QColor(255 - base.red(), 255 - base.green(), 255 - base.blue())
-                inv.setAlpha(preview_alpha)
-                painter.setBrush(QBrush(inv))
-                sx = (dx - min_dx) * cell + padding
-                sy = (dy - min_dy) * cell + padding
-                painter.drawRect(sx, sy, cell, cell)
+                    neg_color = QColor(0, 0, 0, 255)
+                
+                painter.setPen(QPen(neg_color, 1))
+                
+                # Check each direction and only draw edges that face empty space
+                # Top edge
+                if (dx, dy - 1) not in occupied:
+                    painter.drawLine(sx, sy, sx + cell - 1, sy)
+                
+                # Bottom edge  
+                if (dx, dy + 1) not in occupied:
+                    painter.drawLine(sx, sy + cell - 1, sx + cell - 1, sy + cell - 1)
+                
+                # Left edge
+                if (dx - 1, dy) not in occupied:
+                    painter.drawLine(sx, sy, sx, sy + cell - 1)
+                
+                # Right edge
+                if (dx + 1, dy) not in occupied:
+                    painter.drawLine(sx + cell - 1, sy, sx + cell - 1, sy + cell - 1)
+                    
         else:
-            # Standard brush preview uses current color (semi-transparent)
+            # BRUSH: Clean filled pixels without any border
+            painter.setPen(Qt.PenStyle.NoPen)
+            
+            # Use current color at FULL opacity
             fill_color = QColor(self.current_color)
-            preview_alpha = 120
-            fill_color.setAlpha(preview_alpha)
+            fill_color.setAlpha(255)
             painter.setBrush(QBrush(fill_color))
+            
+            # Fill each pixel cleanly
             for dx, dy in occupied:
                 sx = (dx - min_dx) * cell + padding
                 sy = (dy - min_dy) * cell + padding
                 painter.drawRect(sx, sy, cell, cell)
 
-        # Outline: draw white border around occupied cluster (one-pixel outside)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(outline_color, 1))
-        # Simple outer rectangle for whole mask plus optional internal holes (none here)
-        painter.drawRect(padding, padding, mask_w * cell - 1, mask_h * cell - 1)
-
-        # For circle small sizes highlight interior shape edges for clarity (optional)
-        if self.brush_shape == 'circle' and size in (3, 5):
-            painter.setPen(QPen(void_outline, 1))
-            # Mark corners not filled (visual hint) by small dots
-            for dy in range(mask_h):
-                for dx in range(mask_w):
-                    gx = dx + min_dx
-                    gy = dy + min_dy
-                    if (gx, gy) not in occupied:
-                        # draw tiny dot only if adjacent to occupied (edge of circle)
-                        if any((gx+ox, gy+oy) in occupied for ox, oy in ((1,0),(-1,0),(0,1),(0,-1))):
-                            cx = dx * cell + padding + cell//2
-                            cy = dy * cell + padding + cell//2
-                            painter.drawPoint(cx, cy)
-
+        # NO rectangular border around the entire shape!
+        
         painter.end()
         return pixmap
         
@@ -566,26 +592,30 @@ class Canvas(QGraphicsView):
         self.pixmap_item.setPixmap(self.pixmap)
                 
     def erase_brush_stroke(self, x, y):
-        """Erase with the brush tool using current size and shape"""
-        painter = QPainter(self.pixmap)
-        painter.setCompositionMode(QPainter.CompositionMode.Clear)
+        """Erase with the brush tool using current size and shape - makes pixels fully transparent"""
+        # Convert to image for direct pixel manipulation
+        image = self.pixmap.toImage()
 
         if self.pixel_perfect:
             x = round(x)
             y = round(y)
 
+        # Fully transparent color (0 alpha)
+        transparent_color = QColor(0, 0, 0, 0)  # Completely transparent
+
         if self.brush_size == 1:
             if 0 <= x < self.canvas_width and 0 <= y < self.canvas_height:
-                painter.fillRect(int(x), int(y), 1, 1, Qt.GlobalColor.transparent)
+                image.setPixelColor(int(x), int(y), transparent_color)
         else:
             size = int(self.brush_size)
             for dx, dy in self._brush_mask(size, self.brush_shape):
                 px = int(x + dx)
                 py = int(y + dy)
                 if 0 <= px < self.canvas_width and 0 <= py < self.canvas_height:
-                    painter.fillRect(px, py, 1, 1, Qt.GlobalColor.transparent)
+                    image.setPixelColor(px, py, transparent_color)
 
-        painter.end()
+        # Update pixmap from modified image
+        self.pixmap = QPixmap.fromImage(image)
         self.pixmap_item.setPixmap(self.pixmap)
         
     def erase_brush_line(self, x1, y1, x2, y2):
@@ -618,12 +648,38 @@ class Canvas(QGraphicsView):
         self.erase_brush_stroke(x, y)
         
     def erase_line(self, x1, y1, x2, y2):
-        """Erase a line (make it white)"""
-        painter = QPainter(self.pixmap)
-        painter.setCompositionMode(QPainter.CompositionMode.Clear)
-        painter.setPen(QPen(Qt.GlobalColor.transparent, 1))
-        painter.drawLine(x1, y1, x2, y2)
-        painter.end()
+        """Erase a line - makes pixels fully transparent"""
+        # Convert to image for direct pixel manipulation
+        image = self.pixmap.toImage()
+        
+        # Fully transparent color (0 alpha)
+        transparent_color = QColor(0, 0, 0, 0)
+        
+        # Use Bresenham algorithm to draw transparent line
+        dx = abs(x2 - x1)
+        dy = abs(y2 - y1)
+        sx = 1 if x1 < x2 else -1
+        sy = 1 if y1 < y2 else -1
+        err = dx - dy
+        
+        x, y = x1, y1
+        while True:
+            if 0 <= x < self.canvas_width and 0 <= y < self.canvas_height:
+                image.setPixelColor(x, y, transparent_color)
+            
+            if x == x2 and y == y2:
+                break
+                
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x += sx
+            if e2 < dx:
+                err += dx
+                y += sy
+        
+        # Update pixmap from modified image
+        self.pixmap = QPixmap.fromImage(image)
         self.pixmap_item.setPixmap(self.pixmap)
         
     def bucket_fill(self, x, y):
