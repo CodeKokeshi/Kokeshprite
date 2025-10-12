@@ -78,9 +78,15 @@ class Canvas(QGraphicsView):
         self.scene = QGraphicsScene()
         self.setScene(self.scene)
         
-        # Create the pixmap for drawing
+        # Create the pixmap for drawing with proper alpha format
         self.pixmap = QPixmap(self.canvas_width, self.canvas_height)
         self.pixmap.fill(Qt.GlobalColor.transparent)
+        
+        # Ensure the pixmap has the correct format for alpha
+        temp_image = self.pixmap.toImage()
+        if temp_image.format() != temp_image.Format.Format_ARGB32:
+            temp_image = temp_image.convertToFormat(temp_image.Format.Format_ARGB32)
+            self.pixmap = QPixmap.fromImage(temp_image)
         
         # Add pixmap to scene
         self.pixmap_item = QGraphicsPixmapItem(self.pixmap)
@@ -593,15 +599,19 @@ class Canvas(QGraphicsView):
                 
     def erase_brush_stroke(self, x, y):
         """Erase with the brush tool using current size and shape - makes pixels fully transparent"""
-        # Convert to image for direct pixel manipulation
+        # Convert to image for direct pixel manipulation, ensuring alpha format
         image = self.pixmap.toImage()
+        
+        # Ensure the image format supports alpha channel
+        if image.format() != image.Format.Format_ARGB32:
+            image = image.convertToFormat(image.Format.Format_ARGB32)
 
         if self.pixel_perfect:
             x = round(x)
             y = round(y)
 
-        # Fully transparent color (0 alpha)
-        transparent_color = QColor(0, 0, 0, 0)  # Completely transparent
+        # Fully transparent color (0 alpha) - explicitly transparent
+        transparent_color = QColor(0, 0, 0, 0)  # RGBA: black with 0 alpha = fully transparent
 
         if self.brush_size == 1:
             if 0 <= x < self.canvas_width and 0 <= y < self.canvas_height:
@@ -614,7 +624,7 @@ class Canvas(QGraphicsView):
                 if 0 <= px < self.canvas_width and 0 <= py < self.canvas_height:
                     image.setPixelColor(px, py, transparent_color)
 
-        # Update pixmap from modified image
+        # Update pixmap from modified image, preserving alpha
         self.pixmap = QPixmap.fromImage(image)
         self.pixmap_item.setPixmap(self.pixmap)
         
