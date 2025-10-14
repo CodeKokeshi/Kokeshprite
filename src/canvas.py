@@ -8,6 +8,7 @@ from PyQt6.QtGui import QPixmap, QPainter, QColor, QPen, QBrush, QScreen, QCurso
 import math
 from .system_eyedropper import SystemEyedropper
 from .history import HistoryManager
+from .symmetry import SymmetryManager
 from functools import lru_cache
 
 class Canvas(QGraphicsView):
@@ -70,6 +71,13 @@ class Canvas(QGraphicsView):
         # History manager (after canvas init so pixmap exists)
         self.history = HistoryManager()
         self.history.push(self.pixmap)
+        
+        # Symmetry manager
+        self.symmetry = SymmetryManager(self.canvas_width, self.canvas_height)
+        
+        # Symmetry center dragging state
+        self._dragging_symmetry_center = False
+        self._dragged_line_index = -1
         
         
     def init_canvas(self):
@@ -170,38 +178,67 @@ class Canvas(QGraphicsView):
         
         painter.restore()
     
-    def drawForeground(self, painter, rect):
-        """Draw grid overlay on top of the canvas"""
-        if not self.grid_enabled:
-            return
+    def get_symmetry_center_at(self, x, y, tolerance=8):
+        """
+        Check if coordinates are near a symmetry line center
         
-        # Only draw grid within the canvas bounds
+        Args:
+            x, y: Canvas coordinates to check
+            tolerance: Distance in pixels (affected by zoom)
+            
+        Returns:
+            Index of the symmetry line if near a center, -1 otherwise
+        """
+        if not self.symmetry.enabled or not self.symmetry.lines:
+            return -1
+        
+        # Adjust tolerance by zoom
+        adjusted_tolerance = tolerance / self.zoom_factor
+        
+        for i, line in enumerate(self.symmetry.lines):
+            dx = x - line.center_x
+            dy = y - line.center_y
+            distance = (dx * dx + dy * dy) ** 0.5
+            
+            if distance <= adjusted_tolerance:
+                return i
+        
+        return -1
+    
+    def drawForeground(self, painter, rect):
+        """Draw grid overlay and symmetry lines on top of the canvas"""
         canvas_rect = self.pixmap_item.boundingRect()
         
-        # Set up grid pen
-        grid_pen = QPen(self.grid_color)
-        grid_pen.setWidth(0)  # Cosmetic pen (always 1 pixel regardless of zoom)
-        painter.setPen(grid_pen)
+        # Draw grid if enabled
+        if self.grid_enabled:
+            # Set up grid pen
+            grid_pen = QPen(self.grid_color)
+            grid_pen.setWidth(0)  # Cosmetic pen (always 1 pixel regardless of zoom)
+            painter.setPen(grid_pen)
+            
+            # Calculate grid lines
+            start_x = int(canvas_rect.left())
+            start_y = int(canvas_rect.top())
+            end_x = int(canvas_rect.right())
+            end_y = int(canvas_rect.bottom())
+            
+            # Draw vertical grid lines
+            x = start_x
+            while x <= end_x:
+                if x >= start_x and x <= end_x:
+                    painter.drawLine(x, start_y, x, end_y)
+                x += self.grid_width
+            
+            # Draw horizontal grid lines
+            y = start_y
+            while y <= end_y:
+                if y >= start_y and y <= end_y:
+                    painter.drawLine(start_x, y, end_x, y)
+                y += self.grid_height
         
-        # Calculate grid lines
-        start_x = int(canvas_rect.left())
-        start_y = int(canvas_rect.top())
-        end_x = int(canvas_rect.right())
-        end_y = int(canvas_rect.bottom())
-        
-        # Draw vertical grid lines
-        x = start_x
-        while x <= end_x:
-            if x >= start_x and x <= end_x:
-                painter.drawLine(x, start_y, x, end_y)
-            x += self.grid_width
-        
-        # Draw horizontal grid lines
-        y = start_y
-        while y <= end_y:
-            if y >= start_y and y <= end_y:
-                painter.drawLine(start_x, y, end_x, y)
-            y += self.grid_height
+        # Draw symmetry lines if enabled
+        if self.symmetry.enabled:
+            self.symmetry.draw_all(painter, self.zoom_factor)
         
     def update_cursor(self):
         """Update the cursor based on current tool and settings"""
@@ -327,7 +364,19 @@ class Canvas(QGraphicsView):
             scene_pos = self.mapToScene(event.position().toPoint())
             canvas_pos = self.pixmap_item.mapFromScene(scene_pos)
             
-            x, y = int(canvas_pos.x()), int(canvas_pos.y())
+            x, y = canvas_pos.x(), canvas_pos.y()
+            
+            # Check if clicking on a symmetry center (takes priority)
+            line_index = self.get_symmetry_center_at(x, y)
+            if line_index >= 0:
+                self._dragging_symmetry_center = True
+                self._dragged_line_index = line_index
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                event.accept()
+                return
+            
+            # Normal drawing
+            x, y = int(x), int(y)
             
             # Allow drawing even if mouse is outside canvas bounds (for large brushes)
             if self.current_tool != "eyedropper":
@@ -341,7 +390,22 @@ class Canvas(QGraphicsView):
                 
     def mouseMoveEvent(self, event):
         """Handle mouse move events for drawing and cursor tracking"""
-        # Handle panning first (scrollbar-based like Aseprite)
+        # Handle symmetry center dragging first
+        if self._dragging_symmetry_center:
+            scene_pos = self.mapToScene(event.position().toPoint())
+            canvas_pos = self.pixmap_item.mapFromScene(scene_pos)
+            
+            x, y = canvas_pos.x(), canvas_pos.y()
+            
+            # Update the symmetry line center
+            self.symmetry.move_line(self._dragged_line_index, x, y)
+            
+            # Force redraw
+            self.viewport().update()
+            event.accept()
+            return
+        
+        # Handle panning (scrollbar-based like Aseprite)
         if self._panning and self._pan_start is not None and self._pan_scroll_origin is not None:
             delta = event.position() - self._pan_start
             h0, v0 = self._pan_scroll_origin
@@ -380,11 +444,20 @@ class Canvas(QGraphicsView):
         # Track last cursor position for dynamic eraser preview
         self._last_cursor_pos = (x, y)
         
+        # Check if hovering over a symmetry center (change cursor)
+        if not self.drawing and not self._panning:
+            line_index = self.get_symmetry_center_at(x, y)
+            if line_index >= 0:
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
+            elif self.current_tool in ["brush", "eraser"]:
+                self.update_cursor()
+        
         # Update cursor position (for brush preview)
         if self.current_tool in ["brush", "eraser"]:
             if self.current_tool == 'eraser':
                 # Regenerate cursor each move for inverse colors
-                self.update_cursor()
+                if self.get_symmetry_center_at(x, y) < 0:  # Only if not hovering center
+                    self.update_cursor()
             self.update()  # Trigger repaint (if any overlay logic is later added)
         
         # Continue drawing if left button is pressed
@@ -409,6 +482,13 @@ class Canvas(QGraphicsView):
             event.accept()
             return
         if event.button() == Qt.MouseButton.LeftButton:
+            # Stop symmetry center dragging
+            if self._dragging_symmetry_center:
+                self._dragging_symmetry_center = False
+                self._dragged_line_index = -1
+                self.update_cursor()
+                event.accept()
+                return
             self.drawing = False
             self.last_point = None
             # Flush pending pixel (if any) then reset
@@ -421,6 +501,15 @@ class Canvas(QGraphicsView):
             
     def draw_brush_stroke(self, x, y):
         """Draw with the brush tool using current size and shape"""
+        # Get all symmetry points (original + mirrored)
+        points = self.symmetry.get_mirrored_points(x, y)
+        
+        # Draw at each point
+        for px, py in points:
+            self._draw_brush_stroke_at(px, py)
+    
+    def _draw_brush_stroke_at(self, x, y):
+        """Internal method: Draw brush stroke at a single point (no symmetry)"""
         if self.pixel_perfect and self.brush_size == 1:
             self._pp_handle_pixel(round(x), round(y))
             return
@@ -440,10 +529,10 @@ class Canvas(QGraphicsView):
             size = int(self.brush_size)
             # Generate mask offsets relative to center
             for dx, dy in self._brush_mask(size, self.brush_shape):
-                px = int(x + dx)
-                py = int(y + dy)
-                if 0 <= px < self.canvas_width and 0 <= py < self.canvas_height:
-                    painter.drawPoint(px, py)
+                bx = int(x + dx)
+                by = int(y + dy)
+                if 0 <= bx < self.canvas_width and 0 <= by < self.canvas_height:
+                    painter.drawPoint(bx, by)
         painter.end()
         self.pixmap_item.setPixmap(self.pixmap)
 
@@ -599,6 +688,15 @@ class Canvas(QGraphicsView):
                 
     def erase_brush_stroke(self, x, y):
         """Erase with the brush tool using current size and shape - makes pixels fully transparent"""
+        # Get all symmetry points (original + mirrored)
+        points = self.symmetry.get_mirrored_points(x, y)
+        
+        # Erase at each point
+        for px, py in points:
+            self._erase_brush_stroke_at(px, py)
+    
+    def _erase_brush_stroke_at(self, x, y):
+        """Internal method: Erase at a single point (no symmetry)"""
         # Convert to image for direct pixel manipulation, ensuring alpha format
         image = self.pixmap.toImage()
         
@@ -619,10 +717,10 @@ class Canvas(QGraphicsView):
         else:
             size = int(self.brush_size)
             for dx, dy in self._brush_mask(size, self.brush_shape):
-                px = int(x + dx)
-                py = int(y + dy)
-                if 0 <= px < self.canvas_width and 0 <= py < self.canvas_height:
-                    image.setPixelColor(px, py, transparent_color)
+                ex = int(x + dx)
+                ey = int(y + dy)
+                if 0 <= ex < self.canvas_width and 0 <= ey < self.canvas_height:
+                    image.setPixelColor(ex, ey, transparent_color)
 
         # Update pixmap from modified image, preserving alpha
         self.pixmap = QPixmap.fromImage(image)

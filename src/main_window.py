@@ -195,6 +195,44 @@ class MainWindow(QMainWindow):
         background_settings_action = QAction('Background Settings...', self)
         background_settings_action.triggered.connect(self.show_background_settings)
         background_menu.addAction(background_settings_action)
+        
+        # Symmetry submenu
+        symmetry_menu = view_menu.addMenu('Symmetry')
+        
+        # Enable/Disable Symmetry
+        self.symmetry_action = QAction('Enable Symmetry', self)
+        self.symmetry_action.setCheckable(True)
+        self.symmetry_action.triggered.connect(self.toggle_symmetry)
+        symmetry_menu.addAction(self.symmetry_action)
+        
+        symmetry_menu.addSeparator()
+        
+        # Symmetry presets
+        preset_vertical = QAction('Vertical Line', self)
+        preset_vertical.triggered.connect(lambda: self.apply_symmetry_preset("vertical"))
+        symmetry_menu.addAction(preset_vertical)
+        
+        preset_horizontal = QAction('Horizontal Line', self)
+        preset_horizontal.triggered.connect(lambda: self.apply_symmetry_preset("horizontal"))
+        symmetry_menu.addAction(preset_horizontal)
+        
+        preset_cross = QAction('Cross (+)', self)
+        preset_cross.triggered.connect(lambda: self.apply_symmetry_preset("cross"))
+        symmetry_menu.addAction(preset_cross)
+        
+        preset_x = QAction('Diagonal (X)', self)
+        preset_x.triggered.connect(lambda: self.apply_symmetry_preset("x"))
+        symmetry_menu.addAction(preset_x)
+        
+        preset_star = QAction('Star (8-way)', self)
+        preset_star.triggered.connect(lambda: self.apply_symmetry_preset("star"))
+        symmetry_menu.addAction(preset_star)
+        
+        symmetry_menu.addSeparator()
+        
+        clear_symmetry = QAction('Clear All Lines', self)
+        clear_symmetry.triggered.connect(self.clear_symmetry_lines)
+        symmetry_menu.addAction(clear_symmetry)
 
         # Disable until a document is open
         self.set_edit_actions_enabled(False)
@@ -399,6 +437,41 @@ class MainWindow(QMainWindow):
         else:  # Cancel
             return False
 
+    def toggle_symmetry(self):
+        """Toggle symmetry on/off"""
+        if hasattr(self, 'canvas'):
+            self.canvas.symmetry.enabled = self.symmetry_action.isChecked()
+            self.canvas.viewport().update()
+    
+    def apply_symmetry_preset(self, preset_name):
+        """Apply a symmetry preset"""
+        if not hasattr(self, 'canvas'):
+            return
+        
+        if preset_name == "vertical":
+            self.canvas.symmetry.clear_lines()
+            self.canvas.symmetry.add_line(0)  # Vertical
+        elif preset_name == "horizontal":
+            self.canvas.symmetry.clear_lines()
+            self.canvas.symmetry.add_line(90)  # Horizontal
+        elif preset_name == "cross":
+            self.canvas.symmetry.add_preset_cross()
+        elif preset_name == "x":
+            self.canvas.symmetry.add_preset_x()
+        elif preset_name == "star":
+            self.canvas.symmetry.add_preset_star()
+        
+        # Enable symmetry
+        self.canvas.symmetry.enabled = True
+        self.symmetry_action.setChecked(True)
+        self.canvas.viewport().update()
+    
+    def clear_symmetry_lines(self):
+        """Clear all symmetry lines"""
+        if hasattr(self, 'canvas'):
+            self.canvas.symmetry.clear_lines()
+            self.canvas.viewport().update()
+    
     def closeEvent(self, event):  # type: ignore[override]
         if self.ensure_safe_to_discard():
             event.accept()
