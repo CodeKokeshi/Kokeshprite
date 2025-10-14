@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# PyInstaller
+*.spec
+build/
+dist/
+*.manifest
+*.exe
+*.ico
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project specific
+convert_icon.py  # Generated icon conversion script, can be regenerated
+
+# Keep the source icon
+!icon.png
+
+# Temporary files
+*.tmp
+*.temp
+*.log
