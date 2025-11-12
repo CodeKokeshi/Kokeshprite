@@ -16,7 +16,7 @@ class StartScreen(QWidget):
         layout.setSpacing(24)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        title = QLabel("Kokeshprite")
+        title = QLabel("Kokesprite")
         title.setStyleSheet("font-size: 42px; font-weight: bold; color: white;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)

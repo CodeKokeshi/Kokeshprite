@@ -1,4 +1,4 @@
 """
-Kokeshprite - Pixel Art Editor
+Kokesprite - Pixel Art Editor
 Source package
 """

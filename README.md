@@ -1,4 +1,4 @@
-﻿# Kokeshprite - Pixel Art Editor
+﻿# Kokesprite - Pixel Art Editor
 
 **Version 0.1.0**
 
@@ -45,10 +45,10 @@ A lightweight, feature-rich pixel art editor focused on pixel-perfect drawing, r
 ## Project Structure
 
 ```
-Kokeshprite/
+Kokesprite/
  main.py                  # Application entry point
  convert_icon.py          # Icon conversion utility (PNG to ICO)
- Kokeshprite.spec         # PyInstaller build configuration
+ Kokesprite.spec          # PyInstaller build configuration
  requirements.txt         # Python dependencies
  icon.png                 # Source icon (256x256 recommended)
 
@@ -71,7 +71,7 @@ Kokeshprite/
 **Generated files** (gitignored):
 - icon.ico - Multi-resolution Windows icon (generated from icon.png)
 - build/ - PyInstaller temporary build files
-- dist/Kokeshprite.exe - Final executable
+- dist/Kokesprite.exe - Final executable
 
 ---
 
@@ -85,8 +85,8 @@ Kokeshprite/
 
 1. **Clone the repository**
 ```powershell
-git clone https://github.com/CodeKokeshi/Kokeshprite.git
-cd Kokeshprite
+git clone https://github.com/CodeKokeshi/Kokesprite.git
+cd Kokesprite
 ```
 
 2. **Create and activate virtual environment**
@@ -122,16 +122,16 @@ This generates icon.ico with multiple Windows-standard resolutions (16x16 to 256
 ### Build the EXE
 
 ```powershell
-python -m PyInstaller Kokeshprite.spec --clean
+python -m PyInstaller Kokesprite.spec --clean
 ```
 
-**Output**: dist/Kokeshprite.exe (single-file executable, ~30-50MB)
+**Output**: dist/Kokesprite.exe (single-file executable, ~30-50MB)
 
 The --clean flag ensures a fresh build by removing temporary files.
 
 ### Build Configuration
 
-The Kokeshprite.spec file controls:
+The Kokesprite.spec file controls:
 - **One-file mode**: Everything packed into single EXE
 - **No console**: GUI-only, no command window
 - **Icon embedding**: Uses icon.ico for executable icon
@@ -141,7 +141,7 @@ The Kokeshprite.spec file controls:
 
 ### Distribution
 
-Simply distribute dist/Kokeshprite.exe - it's a standalone executable with everything bundled!
+Simply distribute dist/Kokesprite.exe - it's a standalone executable with everything bundled!
 
 Users can double-click to run without installing Python or dependencies.
 
@@ -192,8 +192,8 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Links
 
-- **Repository**: [github.com/CodeKokeshi/Kokeshprite](https://github.com/CodeKokeshi/Kokeshprite)
-- **Issues**: [Report bugs or request features](https://github.com/CodeKokeshi/Kokeshprite/issues)
+- **Repository**: [github.com/CodeKokeshi/Kokesprite](https://github.com/CodeKokeshi/Kokesprite)
+- **Issues**: [Report bugs or request features](https://github.com/CodeKokeshi/Kokesprite/issues)
 
 ---
 

@@ -1,5 +1,5 @@
 """
-Main Window for Kokeshprite Pixel Art Editor
+Main Window for Kokesprite Pixel Art Editor
 """
 
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
@@ -29,7 +29,7 @@ class MainWindow(QMainWindow):
         
     def init_ui(self):
         """Initialize the user interface"""
-        self.setWindowTitle("Kokeshprite - Pixel Art Editor")
+        self.setWindowTitle("Kokesprite by CodeKokeshi")
         self.setGeometry(100, 100, 1200, 800)
         # Stacked root: start screen / editor
         self.stacked = QStackedWidget()
@@ -354,7 +354,7 @@ class MainWindow(QMainWindow):
         self.update_window_title()
 
     def update_window_title(self):
-        base = "Kokeshprite - Pixel Art Editor"
+        base = "Kokesprite by CodeKokeshi"
         if self.current_file_path:
             import os
             name = os.path.basename(self.current_file_path)

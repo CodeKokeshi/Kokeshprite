@@ -1,5 +1,5 @@
 """
-Tools panel for Kokeshprite
+Tools panel for Kokesprite
 Contains drawing tools like brush, eraser, bucket fill, etc.
 """
 

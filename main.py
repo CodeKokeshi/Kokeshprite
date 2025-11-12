@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Kokeshprite - Pixel Art Editor
+Kokesprite - Pixel Art Editor
 Main application entry point
 """
 
@@ -32,7 +32,7 @@ def get_icon_path():
 def main():
     """Initialize and run the application"""
     app = QApplication(sys.argv)
-    app.setApplicationName("Kokeshprite")
+    app.setApplicationName("Kokesprite")
     app.setApplicationVersion("0.1.0")
     
     # Set application icon (shows in taskbar and window title)

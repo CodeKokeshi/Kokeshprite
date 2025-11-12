@@ -23,7 +23,7 @@ dist/
 *.ico
 
 # Keep the spec file for reproducible builds
-!Kokeshprite.spec
+!Kokesprite.spec
 
 # IDE
 .vscode/

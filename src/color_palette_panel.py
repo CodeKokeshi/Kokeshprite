@@ -1,5 +1,5 @@
 """
-Color Palette Panel for Kokeshprite
+Color Palette Panel for Kokesprite
 Contains color swatches and palette management
 """
 

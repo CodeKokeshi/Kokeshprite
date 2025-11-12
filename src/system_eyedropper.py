@@ -1,5 +1,5 @@
 """
-System-wide Eyedropper Tool for Kokeshprite
+System-wide Eyedropper Tool for Kokesprite
 Allows picking colors from anywhere on the screen with preview
 """
 
