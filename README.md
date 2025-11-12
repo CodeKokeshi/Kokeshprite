@@ -105,6 +105,32 @@ pip install -r requirements.txt
 python main.py
 ```
 
+### Troubleshooting: ModuleNotFoundError
+
+**Problem**: `ModuleNotFoundError: No module named 'PyQt6'` when running the application.
+
+**Cause**: You're using the system Python instead of the virtual environment.
+
+**Solutions**:
+
+1. **Via Command Line**: Always activate the virtual environment first:
+   ```powershell
+   .\.venv\Scripts\Activate.ps1
+   python main.py
+   ```
+
+2. **In VS Code**: Configure VS Code to use the virtual environment:
+   - Click the Python version in the bottom-right status bar
+   - Select the interpreter: `.venv\Scripts\python.exe`
+   - Or create `.vscode/settings.json` with:
+     ```json
+     {
+         "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe"
+     }
+     ```
+   - Reload VS Code window (Ctrl+Shift+P → "Reload Window")
+   - Now "Run Python File" button will work correctly!
+
 ---
 
 ## Building Executable
