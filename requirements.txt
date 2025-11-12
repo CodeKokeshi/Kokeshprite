@@ -1,0 +1,11 @@
+# Kokeshprite - Pixel Art Editor
+# Python dependencies
+
+# GUI Framework
+PyQt6>=6.4.0
+
+# Image processing (for icon conversion)
+Pillow>=10.0.0
+
+# Building executable (development only)
+pyinstaller>=6.0.0
