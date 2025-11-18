@@ -6,7 +6,7 @@ A lightweight, feature-rich pixel art editor focused on pixel-perfect drawing, r
 
 **Demo**
 
-[![Watch the Kokesprite demo](https://i.ytimg.com/an_webp/o6BtIGVkHu4/mqdefault_6s.webp?du=3000&sqp=COiJ8MgG&rs=AOn4CLA9qHCW7z1fSod0K0cN8e0I2qhffg)](https://www.youtube.com/watch?v=o6BtIGVkHu4)
+[![Watch the Kokesprite demo](https://i.ytimg.com/an_webp/o6BtIGVkHu4/mqdefault_30s.webp?du=3000&sqp=COiJ8MgG&rs=AOn4CLA9qHCW7z1fSod0K0cN8e0I2qhffg)](https://www.youtube.com/watch?v=o6BtIGVkHu4)
 
 ---
 
