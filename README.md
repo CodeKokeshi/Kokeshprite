@@ -6,7 +6,7 @@ A lightweight, feature-rich pixel art editor focused on pixel-perfect drawing, r
 
 **Demo**
 
-[▶ Watch the demo (MP4)](demo/Kokesprite%20Demo.mp4)
+https://raw.githubusercontent.com/CodeKokeshi/Kokesprite-by-CodeKokeshi/main/demo/Kokesprite%20Demo.mp4
 
 ---
 
