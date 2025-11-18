@@ -6,7 +6,11 @@ A lightweight, feature-rich pixel art editor focused on pixel-perfect drawing, r
 
 **Demo**
 
+<<<<<<< HEAD
 [![Watch the Kokesprite demo](demo/thumbnail.png)](https://www.youtube.com/watch?v=o6BtIGVkHu4 "Kokesprite - Trying to recreate Aseprite in Python from Scratch")
+=======
+[![Watch the Kokesprite demo](https://i.ytimg.com/an_webp/o6BtIGVkHu4/mqdefault_6s.webp?du=3000&sqp=COiJ8MgG&rs=AOn4CLA9qHCW7z1fSod0K0cN8e0I2qhffg)](https://www.youtube.com/watch?v=o6BtIGVkHu4)
+>>>>>>> 7e61b972a57c8ef558e3cdf4b4eb9e5d122159c3
 
 ---
 
