@@ -4,12 +4,15 @@
 
 A lightweight, feature-rich pixel art editor focused on pixel-perfect drawing, responsive UI, and professional-quality tools. Built with PyQt6 for a native desktop feel and designed for artists who want precise control over pixels, cursors, and symmetry.
 
-<figure>
-   <figcaption><strong>Demo</strong></figcaption>
-   <video src="demo/Kokesprite Demo.mp4" controls loop muted playsinline width="100%">
-      Your browser does not support the video tag. You can download the demo from <a href="demo/Kokesprite Demo.mp4">here</a>.
-   </video>
-</figure>
+> **Demo** – GitHub strips embedded video tags in README files. Click the thumbnail below to download/play the MP4 locally.
+
+<p align="center">
+   <a href="demo/Kokesprite%20Demo.mp4">
+      <img src="icon.png" alt="Watch the Kokesprite demo" width="240" />
+   </a>
+   <br />
+   <em>Click to open demo video (MP4)</em>
+</p>
 
 ---
 
