@@ -6,7 +6,10 @@ A lightweight, feature-rich pixel art editor focused on pixel-perfect drawing, r
 
 **Demo**
 
-https://github.com/user-attachments/assets/f40c4a01-f5a3-4220-8d9f-8f50f1750742
+https://github.com/user-attachments/assets/2274f183-ff95-4b06-91f0-6f9d5a743644
+
+
+
 ---
 
 ## Features
