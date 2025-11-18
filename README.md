@@ -4,12 +4,8 @@
 
 A lightweight, feature-rich pixel art editor focused on pixel-perfect drawing, responsive UI, and professional-quality tools. Built with PyQt6 for a native desktop feel and designed for artists who want precise control over pixels, cursors, and symmetry.
 
-<figure>
-   <figcaption><strong>Demo</strong></figcaption>
-   <video src="demo/Kokesprite Demo.mp4" controls loop muted playsinline width="100%">
-      Your browser does not support the video tag. You can download the demo from <a href="demo/Kokesprite Demo.mp4">here</a>.
-   </video>
-</figure>
+<p><strong>Demo</strong></p>
+<iframe width="864" height="486" src="https://www.youtube.com/embed/o6BtIGVkHu4" title="Kokesprite - Trying to recreate Aseprite in Python from Scratch" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
 
 ---
 
